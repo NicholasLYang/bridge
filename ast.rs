@@ -30,11 +30,11 @@ pub struct ProgramT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
-    Asgn(Pat, Loc<Expr>),
+    Asgn(Name, Loc<Expr>),
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
     Block(Vec<Loc<Stmt>>),
-    Function(Name, Pat, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
+    Function(Name, Vec<(Name, TypeSig)>, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
     Export(Name),
 }
 
