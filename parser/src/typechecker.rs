@@ -43,7 +43,7 @@ pub enum TypeError {
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: Type },
+    NotARecord { type_: String },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -58,6 +58,8 @@ pub enum TypeError {
         location
     )]
     ShadowingFunction { location: LocationRange },
+    #[fail(display = "{}: Functions are not values", location)]
+    FuncValues { location: LocationRange },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -107,29 +109,8 @@ pub fn is_ref_type(type_id: TypeId) -> bool {
 
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
-        let mut symbol_table = SymbolTable::new();
-        let mut type_table = TypeTable::new();
-        let print_int_id = name_table.insert("printInt".into());
-        symbol_table.insert_function(
-            print_int_id,
-            INT_INDEX,
-            UNIT_INDEX,
-            type_table.insert(Type::Arrow(INT_INDEX, UNIT_INDEX)),
-        );
-        let print_float_id = name_table.insert("printFloat".into());
-        symbol_table.insert_function(
-            print_float_id,
-            FLOAT_INDEX,
-            UNIT_INDEX,
-            type_table.insert(Type::Arrow(FLOAT_INDEX, UNIT_INDEX)),
-        );
-        let print_string_id = name_table.insert("printString".into());
-        symbol_table.insert_function(
-            print_string_id,
-            STR_INDEX,
-            UNIT_INDEX,
-            type_table.insert(Type::Arrow(STR_INDEX, UNIT_INDEX)),
-        );
+        let symbol_table = SymbolTable::new();
+        let type_table = TypeTable::new();
 
         TypeChecker {
             symbol_table,
@@ -148,12 +129,6 @@ impl TypeChecker {
     #[allow(dead_code)]
     pub fn get_name_table(&self) -> &NameTable {
         &self.name_table
-    }
-
-    fn get_fresh_type_var(&mut self) -> TypeId {
-        let type_var = Type::Var(self.type_var_index);
-        self.type_var_index += 1;
-        self.type_table.insert(type_var)
     }
 
     fn generate_field_info<'a, I>(&self, fields: I) -> Vec<bool>
@@ -213,8 +188,7 @@ impl TypeChecker {
         for stmt in program.stmts {
             match self.stmt(stmt) {
                 Ok(stmt_t) => {
-                    let mut stmt_t = stmt_t;
-                    typed_stmts.append(&mut stmt_t);
+                    typed_stmts.push(stmt_t);
                 }
                 Err(err) => {
                     errors.push(err);
@@ -228,21 +202,33 @@ impl TypeChecker {
         }
     }
 
+    fn func_params(
+        &mut self,
+        params: &Vec<Loc<(Name, Loc<TypeSig>)>>,
+    ) -> Result<Vec<Loc<(Name, TypeId)>>, TypeError> {
+        let mut typed_params = Vec::new();
+        for param in params {
+            let (name, type_sig) = &param.inner;
+            let param_type = self.lookup_type_sig(type_sig)?;
+            typed_params.push(Loc {
+                location: param.location,
+                inner: (*name, param_type),
+            });
+        }
+        Ok(typed_params)
+    }
+
     // Reads functions defined in this block
     fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), TypeError> {
         for stmt in stmts {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
-                let params_type = self.pat(&params)?;
-                let return_type = if let Some(type_sig) = return_type_sig {
-                    self.lookup_type_sig(type_sig)?
-                } else {
-                    self.get_fresh_type_var()
-                };
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
-                self.symbol_table
-                    .insert_function(*func_name, params_type, return_type, type_);
+                let params_type = self.func_params(params)?;
+                let return_type = self.lookup_type_sig(return_type_sig)?;
+                self.symbol_table.insert_function(
+                    *func_name,
+                    params_type.iter().map(|e| e.inner.1).collect(),
+                    return_type,
+                );
             }
         }
         Ok(())
@@ -263,57 +249,31 @@ impl TypeChecker {
         }
     }
 
-    pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Vec<Loc<StmtT>>, TypeError> {
+    pub fn stmt(&mut self, stmt: Loc<Stmt>) -> Result<Loc<StmtT>, TypeError> {
         let location = stmt.location;
         match stmt.inner {
             Stmt::Expr(expr) => {
                 let typed_expr = self.expr(expr)?;
-                Ok(vec![Loc {
+                Ok(Loc {
                     location,
                     inner: StmtT::Expr(typed_expr),
-                }])
+                })
             }
-            Stmt::Function(func_name, params, _, body) => {
-                let sym_entry = if let Some(entry) = self.symbol_table.lookup_name(func_name) {
-                    entry
-                } else {
-                    return Err(TypeError::VarNotDefined {
-                        name: self.name_table.get_str(&func_name).to_string(),
-                        location,
-                    });
-                };
-                let (params_type, return_type) = if let EntryType::Function {
-                    index: _,
-                    params_type,
-                    return_type,
-                    type_: _,
-                } = &sym_entry.entry_type
-                {
-                    (*params_type, *return_type)
-                } else {
-                    return Err(TypeError::ShadowingFunction { location });
-                };
-                let function = self.function(params, *body, return_type)?;
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Function {
-                        name: func_name,
-                        params_type,
-                        return_type,
-                        function,
-                    },
-                }])
+            Stmt::Function(name, params, return_type, body) => {
+                let params = self.func_params(&params)?;
+                let return_type = self.lookup_type_sig(&return_type)?;
+                self.function(name, params, *body, return_type, location)
             }
-            Stmt::Asgn(pat, rhs) => Ok(self.asgn(pat, rhs, location)?),
+            Stmt::Asgn(name, type_sig, rhs) => Ok(self.asgn(name, type_sig, rhs, location)?),
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type {
                     Some(return_type) => {
                         if self.is_unifiable(typed_expr.inner.get_type(), return_type) {
-                            Ok(vec![Loc {
+                            Ok(Loc {
                                 location,
                                 inner: StmtT::Return(typed_expr),
-                            }])
+                            })
                         } else {
                             let type1 = type_to_string(
                                 &self.name_table,
@@ -333,29 +293,6 @@ impl TypeChecker {
                         location: stmt.location,
                     }),
                 }
-            }
-            Stmt::Block(stmts) => {
-                self.read_functions(&stmts)?;
-                let mut typed_stmts = Vec::new();
-                for stmt in stmts {
-                    typed_stmts.push(self.stmt(stmt)?);
-                }
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Block(typed_stmts.into_iter().flatten().collect()),
-                }])
-            }
-            Stmt::Export(name) => {
-                self.symbol_table
-                    .lookup_name(name)
-                    .ok_or(TypeError::VarNotDefined {
-                        location,
-                        name: self.name_table.get_str(&name).to_string(),
-                    })?;
-                Ok(vec![Loc {
-                    location,
-                    inner: StmtT::Export(name),
-                }])
             }
         }
     }
@@ -396,93 +333,6 @@ impl TypeChecker {
                 })
                 .map(|t| *t),
             TypeSig::Empty => Ok(UNIT_INDEX),
-            TypeSig::Arrow(param_sigs, return_sig) => {
-                let param_types = if param_sigs.len() == 1 {
-                    self.lookup_type_sig(&param_sigs[0])?
-                } else {
-                    let mut types = Vec::new();
-                    for param in param_sigs {
-                        types.push(self.lookup_type_sig(param)?);
-                    }
-                    self.type_table.insert(Type::Tuple(types))
-                };
-
-                let return_type = self.lookup_type_sig(return_sig)?;
-                Ok(self
-                    .type_table
-                    .insert(Type::Arrow(param_types, return_type)))
-            }
-        }
-    }
-
-    fn pat(&mut self, pat: &Pat) -> Result<TypeId, TypeError> {
-        match pat {
-            Pat::Id(_, Some(type_sig), _) => {
-                let type_ = self.lookup_type_sig(&type_sig)?;
-                Ok(type_)
-            }
-            Pat::Id(_, None, _) => {
-                let type_ = self.get_fresh_type_var();
-                Ok(type_)
-            }
-            Pat::Tuple(pats, _) => {
-                let types: Result<Vec<_>, _> = pats.iter().map(|pat| self.pat(pat)).collect();
-                Ok(self.type_table.insert(Type::Tuple(types?)))
-            }
-            Pat::Record(pats, type_sig, _) => {
-                // In the future I should unify these two if they both exist.
-                if let Some(type_sig) = type_sig {
-                    self.lookup_type_sig(&type_sig)
-                } else {
-                    let types: Result<Vec<_>, _> = pats
-                        .iter()
-                        .map(|name| Ok((*name, self.get_fresh_type_var())))
-                        .collect();
-                    Ok(self.type_table.insert(Type::Record(types?)))
-                }
-            }
-            Pat::Empty(_) => Ok(UNIT_INDEX),
-        }
-    }
-
-    /// Gets the function parameters as a list of names with
-    /// types. Useful for WebAssembly code generation.
-    fn get_func_params(&mut self, pat: &Pat) -> Result<Vec<(Name, TypeId)>, TypeError> {
-        match pat {
-            Pat::Id(name, Some(type_sig), _) => {
-                let type_ = self.lookup_type_sig(&type_sig)?;
-                Ok(vec![(*name, type_)])
-            }
-            Pat::Id(name, None, _) => {
-                let type_ = self.get_fresh_type_var();
-                self.symbol_table.insert_var(*name, type_.clone());
-                Ok(vec![(*name, type_)])
-            }
-            Pat::Tuple(pats, _) => {
-                let mut types = Vec::new();
-                for pat in pats {
-                    types.append(&mut self.get_func_params(pat)?)
-                }
-                Ok(types)
-            }
-            Pat::Record(names, type_sig, _) => {
-                let type_ = if let Some(type_sig) = type_sig {
-                    Some(self.lookup_type_sig(&type_sig)?)
-                } else {
-                    None
-                };
-                let mut params = Vec::new();
-                for name in names {
-                    let field_type = if let Some(t) = &type_ {
-                        self.get_field_type(*t, *name)?
-                    } else {
-                        self.get_fresh_type_var()
-                    };
-                    params.push((*name, field_type))
-                }
-                Ok(params)
-            }
-            Pat::Empty(_) => Ok(Vec::new()),
         }
     }
 
@@ -501,111 +351,28 @@ impl TypeChecker {
             }
         } else {
             Err(TypeError::NotARecord {
-                type_: self.type_table.get_type(record_type).clone(),
+                type_: type_to_string(&self.name_table, &self.type_table, record_type),
             })
-        }
-    }
-
-    // Desugars an assignment statement into multiple bindings.
-    // We pass in a location because these bindings don't have
-    // an actual source code place so we just give them the location
-    // of the original assignment
-    fn generate_pattern_bindings(
-        &mut self,
-        pat: &Pat,
-        owner_name: Name,
-        rhs_type: TypeId,
-        location: LocationRange,
-    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
-        let mut bindings = Vec::new();
-        match pat {
-            Pat::Id(_, _, _) | Pat::Empty(_) => Ok(Vec::new()),
-            Pat::Record(names, _, _) => {
-                for name in names {
-                    let type_ = self.get_field_type(rhs_type, *name)?;
-                    self.symbol_table.insert_var(*name, type_.clone());
-                    bindings.push(Loc {
-                        location,
-                        inner: StmtT::Asgn(
-                            *name,
-                            Loc {
-                                location,
-                                inner: ExprT::Field(
-                                    Box::new(Loc {
-                                        location,
-                                        inner: ExprT::Var {
-                                            name: owner_name,
-                                            type_: rhs_type.clone(),
-                                        },
-                                    }),
-                                    *name,
-                                    type_,
-                                ),
-                            },
-                        ),
-                    });
-                }
-                Ok(bindings)
-            }
-            Pat::Tuple(pats, _) => {
-                // TODO: Make this recursive so that we can
-                // flatten bindings
-                for (i, pat) in pats.iter().enumerate() {
-                    let name = self.name_table.get_fresh_name();
-                    bindings.push(Loc {
-                        location,
-                        inner: StmtT::Asgn(
-                            name,
-                            Loc {
-                                location,
-                                inner: ExprT::Field(
-                                    Box::new(Loc {
-                                        location,
-                                        inner: ExprT::Var {
-                                            name: owner_name,
-                                            type_: rhs_type.clone(),
-                                        },
-                                    }),
-                                    i,
-                                    self.get_fresh_type_var(),
-                                ),
-                            },
-                        ),
-                    });
-                    let type_ = self.get_fresh_type_var();
-                    bindings
-                        .append(&mut self.generate_pattern_bindings(pat, name, type_, location)?)
-                }
-                Ok(bindings)
-            }
         }
     }
 
     fn asgn(
         &mut self,
-        pat: Pat,
+        name: Name,
+        type_sig: Loc<TypeSig>,
         rhs: Loc<Expr>,
         location: LocationRange,
-    ) -> Result<Vec<Loc<StmtT>>, TypeError> {
-        let pat_type = self.pat(&pat)?;
+    ) -> Result<Loc<StmtT>, TypeError> {
         let typed_rhs = self.expr(rhs)?;
-        if let Some(type_) = self.unify(pat_type, typed_rhs.inner.get_type()) {
-            let name = if let Pat::Id(name, _, _) = pat {
-                name
-            } else {
-                self.name_table.get_fresh_name()
-            };
+        let type_sig_type = self.lookup_type_sig(&type_sig)?;
+        if let Some(type_) = self.unify(type_sig_type, typed_rhs.inner.get_type()) {
             self.symbol_table.insert_var(name, type_);
-            let mut pat_bindings =
-                self.generate_pattern_bindings(&pat, name, typed_rhs.inner.get_type(), location)?;
-            let mut bindings = vec![Loc {
+            Ok(Loc {
                 location,
                 inner: StmtT::Asgn(name, typed_rhs),
-            }];
-            bindings.append(&mut pat_bindings);
-            Ok(bindings)
+            })
         } else {
-            let type1 = type_to_string(&self.name_table, &self.type_table, pat_type);
+            let type1 = type_to_string(&self.name_table, &self.type_table, type_sig_type);
             let type2 = type_to_string(
                 &self.name_table,
                 &self.type_table,
@@ -629,15 +396,17 @@ impl TypeChecker {
      **/
     fn function(
         &mut self,
-        params: Pat,
+        name: Name,
+        params: Vec<Loc<(Name, TypeId)>>,
         body: Loc<Expr>,
         return_type: TypeId,
-    ) -> Result<Function, TypeError> {
+        location: LocationRange,
+    ) -> Result<Loc<StmtT>, TypeError> {
         let previous_scope = self.symbol_table.push_scope(true);
         let old_var_types = self.symbol_table.reset_vars();
-        let func_params = self.get_func_params(&params)?;
-        for (name, type_) in &func_params {
-            self.symbol_table.insert_var(name.clone(), *type_);
+        for param in &params {
+            let (name, type_) = &param.inner;
+            self.symbol_table.insert_var(*name, *type_);
         }
         // Save the current return type
         let mut old_return_type = self.return_type;
@@ -651,7 +420,7 @@ impl TypeChecker {
         std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
         // with return type.
-        let return_type = if body_type != UNIT_INDEX {
+        if body_type != UNIT_INDEX {
             self.unify(old_return_type.unwrap(), body_type)
                 .ok_or_else(|| {
                     let type1 = type_to_string(
@@ -670,18 +439,19 @@ impl TypeChecker {
             old_return_type.unwrap()
         };
 
-        // If return type is a type var, we just set it be unit
-        if let Type::Var(_) = self.type_table.get_type(return_type) {
-            self.type_table.update(return_type, Type::Unit);
-        };
-
         let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope(previous_scope);
-        Ok(Function {
-            params: func_params,
-            body: Box::new(body),
-            local_variables,
-            scope_index,
+        Ok(Loc {
+            location,
+            inner: StmtT::Function {
+                name,
+                function: Function {
+                    params,
+                    body: Box::new(body),
+                    local_variables,
+                    scope_index,
+                },
+            },
         })
     }
 
@@ -705,14 +475,7 @@ impl TypeChecker {
                         index: _,
                         params_type: _,
                         return_type: _,
-                        type_,
-                    } => Ok(Loc {
-                        location,
-                        inner: ExprT::Var {
-                            name,
-                            type_: *type_,
-                        },
-                    }),
+                    } => Err(TypeError::FuncValues { location }),
                     EntryType::Var { var_type, index: _ } => Ok(Loc {
                         location,
                         inner: ExprT::Var {
@@ -762,35 +525,6 @@ impl TypeChecker {
                     inner: ExprT::Tuple(typed_elems, self.type_table.insert(Type::Tuple(types))),
                 })
             }
-
-            Expr::Function {
-                params,
-                body,
-                return_type: return_type_sig,
-            } => {
-                let name = self.name_table.get_fresh_name();
-                let params_type = self.pat(&params)?;
-                let return_type = if let Some(return_type_sig) = return_type_sig {
-                    self.lookup_type_sig(&return_type_sig)?
-                } else {
-                    self.get_fresh_type_var()
-                };
-                let function = self.function(params, *body, return_type)?;
-                let type_ = self
-                    .type_table
-                    .insert(Type::Arrow(params_type, return_type));
-                self.symbol_table
-                    .insert_function(name, params_type, return_type, type_);
-                let func = Loc {
-                    location,
-                    inner: ExprT::Function {
-                        function,
-                        type_,
-                        name,
-                    },
-                };
-                Ok(func)
-            }
             Expr::UnaryOp { op, rhs } => {
                 let typed_rhs = self.expr(*rhs)?;
                 let rhs_type = typed_rhs.inner.get_type();
@@ -821,30 +555,37 @@ impl TypeChecker {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
-                    Type::Arrow(params_type, return_type) => (*params_type, *return_type),
-                    Type::Var(_) => {
-                        let params_type = self.get_fresh_type_var();
-                        let return_type = self.get_fresh_type_var();
-                        self.type_table
-                            .insert(Type::Arrow(params_type, return_type));
-                        (params_type, return_type)
-                    }
+                    Type::Arrow(params_type, return_type) => (params_type.clone(), *return_type),
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
-                let typed_args = self.expr(*args)?;
-                let args_type = typed_args.inner.get_type();
-                if self.is_unifiable(params_type, args_type) {
+                let mut typed_args = Vec::new();
+                for arg in args {
+                    typed_args.push(self.expr(arg)?);
+                }
+                let args_type = typed_args
+                    .iter()
+                    .map(|arg| arg.inner.get_type())
+                    .collect::<Vec<TypeId>>();
+                if self.unify_type_vectors(&params_type, &args_type).is_some() {
                     Ok(Loc {
                         location,
                         inner: ExprT::Call {
                             callee: Box::new(typed_callee),
-                            args: Box::new(typed_args),
+                            args: typed_args,
                             type_: return_type,
                         },
                     })
                 } else {
-                    let type1 = type_to_string(&self.name_table, &self.type_table, params_type);
-                    let type2 = type_to_string(&self.name_table, &self.type_table, args_type);
+                    let type1 = params_type
+                        .iter()
+                        .map(|t| type_to_string(&self.name_table, &self.type_table, *t))
+                        .collect::<Vec<String>>()
+                        .join(",");
+                    let type2 = args_type
+                        .iter()
+                        .map(|t| type_to_string(&self.name_table, &self.type_table, *t))
+                        .collect::<Vec<String>>()
+                        .join(",");
                     Err(TypeError::UnificationFailure {
                         location,
                         type1,
@@ -857,7 +598,7 @@ impl TypeChecker {
                 let mut typed_stmts = Vec::new();
                 let previous_scope = self.symbol_table.push_scope(false);
                 for stmt in stmts {
-                    typed_stmts.append(&mut self.stmt(stmt)?);
+                    typed_stmts.push(self.stmt(stmt)?);
                 }
                 let (type_, typed_end_expr) = if let Some(expr) = end_expr {
                     let typed_expr = self.expr(*expr)?;
@@ -957,26 +698,27 @@ impl TypeChecker {
             }
             Expr::Field(lhs, name) => {
                 let lhs_t = self.expr(*lhs)?;
-                let type_ = if let Type::Record(fields) =
-                    self.type_table.get_type(lhs_t.inner.get_type())
-                {
-                    let field = fields.iter().find(|(field_name, _)| *field_name == name);
+                let type_id = lhs_t.inner.get_type();
+                match self.type_table.get_type(type_id) {
+                    Type::Record(fields) => {
+                        let field = fields.iter().find(|(field_name, _)| *field_name == name);
 
-                    if let Some(field) = field {
-                        field.1
-                    } else {
-                        let name_str = self.name_table.get_str(&name);
-                        return Err(TypeError::FieldDoesNotExist {
-                            name: name_str.to_string(),
-                        });
+                        if let Some(field) = field {
+                            Ok(Loc {
+                                location,
+                                inner: ExprT::Field(Box::new(lhs_t), name, field.1),
+                            })
+                        } else {
+                            let name_str = self.name_table.get_str(&name);
+                            Err(TypeError::FieldDoesNotExist {
+                                name: name_str.to_string(),
+                            })
+                        }
                     }
-                } else {
-                    self.get_fresh_type_var()
-                };
-                Ok(Loc {
-                    location,
-                    inner: ExprT::Field(Box::new(lhs_t), name, type_),
-                })
+                    _ => Err(TypeError::NotARecord {
+                        type_: type_to_string(&self.name_table, &self.type_table, type_id),
+                    }),
+                }
             }
         }
     }
@@ -1080,7 +822,7 @@ impl TypeChecker {
             }
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 match (
-                    self.unify(param_type1, param_type2),
+                    self.unify_type_vectors(&param_type1, &param_type2),
                     self.unify(return_type1, return_type2),
                 ) {
                     (Some(param_type), Some(return_type)) => {
@@ -1092,14 +834,6 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
-            (Type::Var(_), t) => {
-                self.type_table.update(type_id1, t.clone());
-                Some(type_id2)
-            }
-            (t, Type::Var(_)) => {
-                self.type_table.update(type_id2, t.clone());
-                Some(type_id1)
-            }
             _ => None,
         }
     }

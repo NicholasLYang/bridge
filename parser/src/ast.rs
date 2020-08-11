@@ -1,6 +1,6 @@
 use crate::lexer::LocationRange;
 use crate::parser::ParseError;
-//use crate::typechecker::TypeError;
+use crate::typechecker::TypeError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -21,26 +21,24 @@ pub struct Program {
     pub errors: Vec<ParseError>,
 }
 
-/*#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ProgramT {
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<TypeError>,
-}*/
+}
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
-    Asgn(Name, Loc<Expr>),
+    Asgn(Name, Loc<TypeSig>, Loc<Expr>),
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
-    Block(Vec<Loc<Stmt>>),
     Function(
         Name,
         Vec<Loc<(Name, Loc<TypeSig>)>>,
         Loc<TypeSig>,
         Box<Loc<Expr>>,
     ),
-    Export(Name),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -49,12 +47,7 @@ pub enum StmtT {
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Block(Vec<Loc<StmtT>>),
-    Function {
-        name: Name,
-        params_type: TypeId,
-        return_type: TypeId,
-        function: Function,
-    },
+    Function { name: Name, function: Function },
     Export(Name),
 }
 
@@ -79,7 +72,7 @@ pub enum Expr {
     },
     Call {
         callee: Box<Loc<Expr>>,
-        args: Box<Loc<Expr>>,
+        args: Vec<Loc<Expr>>,
     },
     Field(Box<Loc<Expr>>, Name),
     Record {
@@ -122,13 +115,6 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
-    // Note: only used for anonymous functions. Functions that are
-    // bound with let are StmtT::Function
-    Function {
-        function: Function,
-        type_: TypeId,
-        name: Name,
-    },
     Record {
         name: Name,
         fields: Vec<(Name, Loc<ExprT>)>,
@@ -137,7 +123,7 @@ pub enum ExprT {
     Field(Box<Loc<ExprT>>, Name, TypeId),
     Call {
         callee: Box<Loc<ExprT>>,
-        args: Box<Loc<ExprT>>,
+        args: Vec<Loc<ExprT>>,
         type_: TypeId,
     },
     Tuple(Vec<Loc<ExprT>>, TypeId),
@@ -153,7 +139,7 @@ pub enum Value {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Function {
-    pub params: Vec<(Name, TypeId)>,
+    pub params: Vec<Loc<(Name, TypeId)>>,
     pub body: Box<Loc<ExprT>>,
     pub local_variables: Vec<TypeId>,
     pub scope_index: usize,
@@ -224,11 +210,10 @@ pub enum Type {
     Bool,
     Char,
     String,
-    Var(Name),
     Array(TypeId),
     Record(Vec<(Name, TypeId)>),
     Tuple(Vec<TypeId>),
-    Arrow(TypeId, TypeId),
+    Arrow(Vec<TypeId>, TypeId),
     // Points to a type that is solved further
     // Not the greatest solution but meh
     Solved(TypeId),
@@ -246,7 +231,6 @@ impl fmt::Display for Type {
                 Type::Bool => "bool".into(),
                 Type::Char => "char".into(),
                 Type::String => "string".into(),
-                Type::Var(name) => format!("var({})", name),
                 Type::Array(t) => format!("[{}]", t),
                 Type::Record(fields) => {
                     let elems = fields
@@ -264,7 +248,14 @@ impl fmt::Display for Type {
                         .join(", ");
                     format!("({})", elems)
                 }
-                Type::Arrow(t1, t2) => format!("{} => {}", t1, t2),
+                Type::Arrow(params, return_type) => {
+                    let elems = params
+                        .iter()
+                        .map(|t| format!("{}", t))
+                        .collect::<Vec<String>>()
+                        .join(",");
+                    format!("({}) => {}", elems, return_type)
+                }
                 Type::Solved(t) => format!("solved({})", t),
             }
         )
@@ -299,11 +290,6 @@ impl ExprT {
             ExprT::UnaryOp {
                 op: _,
                 rhs: _,
-                type_,
-            } => *type_,
-            ExprT::Function {
-                function: _,
-                name: _,
                 type_,
             } => *type_,
             ExprT::Field(_, _, type_) => *type_,
