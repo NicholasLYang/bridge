@@ -4,10 +4,22 @@ use core::str;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
-    Function(FuncDesc),
-    MakeInt(i64),
-    GetLocal { var_offset: i32, offset: u32 },
-    SetLocal { var_offset: i32, offset: u32 },
+    Function(FuncDesc), // Function header used for callstack manipulation
+
+    StackAlloc(u32),    // Allocates space on the stack
+    StackAllocPtr(u32), // Allocates space on the stack, then pushes a pointer to that space onto the stack
+    Alloc(u32), // Allocates space on the heap, then pushes a pointer to that space onto the stack
+
+    MakeTempIntWord(i64), // Make a temporary integer
+
+    GetLocalWord { var_offset: i32, offset: u32 },
+    SetLocalWord { var_offset: i32, offset: u32 },
+
+    GetWord { offset: i32 },
+    SetWord { offset: i32 },
+
+    Ret,
+
     AddCallstackDesc(FuncDesc),
     RemoveCallstackDesc,
 }
