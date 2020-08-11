@@ -1,3 +1,5 @@
+use std::io::Write;
+
 #[derive(Debug, Clone, Copy)]
 pub struct FuncDesc {
     pub file: u32,
@@ -18,6 +20,7 @@ pub fn u32_to_u16_tup(value: u32) -> (u16, u16) {
     ((value >> 16) as u16, value as u16)
 }
 
+#[derive(Debug)]
 pub struct Error {
     pub short_name: String,
     pub message: String,
@@ -31,5 +34,56 @@ impl Error {
             message,
             stack_trace: Vec::new(),
         }
+    }
+}
+
+pub struct StringWriter {
+    buf: Vec<u8>,
+}
+
+impl StringWriter {
+    pub fn new() -> StringWriter {
+        StringWriter {
+            buf: Vec::with_capacity(8 * 1024),
+        }
+    }
+
+    pub fn to_string(self) -> String {
+        if let Ok(s) = String::from_utf8(self.buf) {
+            s
+        } else {
+            String::new()
+        }
+    }
+}
+
+impl Write for StringWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for b in buf {
+            self.buf.push(*b);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub struct Void {}
+
+impl Void {
+    pub fn new() -> Self {
+        return Self {};
+    }
+}
+
+impl Write for Void {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
