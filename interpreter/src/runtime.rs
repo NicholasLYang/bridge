@@ -3,7 +3,13 @@ use crate::util::*;
 use core::mem;
 use std::io::Write;
 
-macro_rules! error{
+macro_rules! error {
+    ($arg1:tt,$($arg:tt)*) => {
+        Error::new($arg1, format!($($arg)*))
+    };
+}
+
+macro_rules! err {
     ($arg1:tt,$($arg:tt)*) => {
         Err(Error::new($arg1, format!($($arg)*)))
     };
@@ -77,11 +83,16 @@ impl VarBuffer {
     }
 
     pub fn get_var_record(&self, var_idx: u32) -> Result<Var, Error> {
-        match self.vars.get(var_idx as usize) {
+        if var_idx == 0 {
+            return err!("NullPointer", "a variable of offset 0 was used");
+        }
+
+        match self.vars.get(var_idx as usize - 1) {
             Some(x) => Ok(*x),
-            None => error!(
+            None => err!(
                 "IncorrectVarOffset",
-                "a variable offset of {} is incorrect", var_idx as usize
+                "a variable offset of {} is incorrect",
+                var_idx as usize
             ),
         }
     }
@@ -98,9 +109,12 @@ impl VarBuffer {
 
         let upper = offset + len as i32;
         if upper > var.len as i32 || offset < 0i32 {
-            return error!(
+            return err!(
                 "OutOfValueBounds",
-                "tried to access bytes {}..{} in an object of length {}", offset, upper, var.len
+                "tried to access bytes {}..{} in an object of length {}",
+                offset,
+                upper,
+                var.len
             );
         }
 
@@ -116,9 +130,12 @@ impl VarBuffer {
 
         let upper = offset + len as i32;
         if upper > var.len as i32 || offset < 0i32 {
-            return error!(
+            return err!(
                 "OutOfValueBounds",
-                "tried to access bytes {}..{} in an object of length {}", offset, upper, var.len
+                "tried to access bytes {}..{} in an object of length {}",
+                offset,
+                upper,
+                var.len
             );
         }
 
@@ -142,7 +159,11 @@ impl VarBuffer {
         return Ok(t);
     }
 
-    pub fn add_var<T: Copy + Default>(&mut self, t: T) -> Var {
+    pub fn upper_bound(&self) -> u32 {
+        return (self.vars.len() + 1) as u32;
+    }
+
+    pub fn add_var<T: Copy + Default>(&mut self, t: T) -> u32 {
         let idx = self.data.len() as u32;
         let len = mem::size_of::<T>();
         if len > u32::MAX as usize {
@@ -152,11 +173,12 @@ impl VarBuffer {
         let len = len as u32;
         let var = Var { idx, len };
         self.data.extend_from_slice(any_as_u8_slice(&t));
+        let var_idx = self.vars.len() as u32 + 1;
         self.vars.push(var);
-        return var;
+        return var_idx;
     }
 
-    pub fn add_var_dyn(&mut self, len: u32) -> Var {
+    pub fn add_var_dyn(&mut self, len: u32) -> u32 {
         let idx = self.data.len() as u32;
         if len > u32::MAX {
             panic!("struct too long");
@@ -164,8 +186,9 @@ impl VarBuffer {
 
         let var = Var { idx, len };
         self.data.resize((idx + len) as usize, 0);
+        let var_idx = self.vars.len() as u32 + 1;
         self.vars.push(var);
-        return var;
+        return var_idx;
     }
 
     pub fn pop_var(&mut self) -> Option<Var> {
@@ -180,7 +203,7 @@ impl VarBuffer {
     }
 
     pub fn shrink_vars_to(&mut self, len: u32) {
-        if (len as usize) < self.vars.len() {
+        if (len as usize) > self.vars.len() {
             panic!("shrinking to a length larger than the vars array");
         }
 
@@ -198,7 +221,7 @@ impl VarBuffer {
 
     pub fn pop_word(&mut self) -> Result<u64, Error> {
         if self.data.len() < 8 {
-            return error!("StackIsEmpty", "tried to pop from stack when it is empty");
+            return err!("StackIsEmpty", "tried to pop from stack when it is empty");
         }
 
         let mut out = 0u64;
@@ -207,7 +230,7 @@ impl VarBuffer {
         if let Some(var) = self.vars.last() {
             let upper = (var.idx + var.len) as usize;
             if self.data.len() - upper < 8 {
-                return error!(
+                return err!(
                     "StackPopInvalidatesVariable",
                     "popping from the stack would invalidate a variable"
                 );
@@ -215,8 +238,10 @@ impl VarBuffer {
         }
 
         let upper = self.data.len();
+        let lower = upper - 8;
 
-        to_bytes.copy_from_slice(&self.data[(upper - 8)..upper]);
+        to_bytes.copy_from_slice(&self.data[lower..upper]);
+        self.data.resize(lower, 0);
         return Ok(out);
     }
 
@@ -240,7 +265,7 @@ where
 {
     pub stack: VarBuffer,
     pub heap: VarBuffer,
-    pub callstack: Vec<FuncDesc>, // Callstack
+    pub callstack: Vec<FuncDesc>,
     pub stdout: Out,
 }
 
@@ -263,11 +288,12 @@ where
 
     pub fn run_func(&mut self, program: Program, program_counter: usize) -> Result<(), Error> {
         let func_desc = match program.ops[program_counter] {
-            Opcode::Function(desc) => desc,
+            Opcode::Func(desc) => desc,
             op => {
-                return error!(
+                return err!(
                     "InvalidFunctionHeader",
-                    "found function header {:?} (this is an error in your compiler)", op
+                    "found function header {:?} (this is an error in your compiler)",
+                    op
                 )
             }
         };
@@ -275,10 +301,11 @@ where
         let callstack_len = self.callstack.len();
         self.callstack.push(func_desc);
 
-        let fp = self.stack.vars.len() as u32;
+        let fp = self.stack.upper_bound();
         let mut pc = program_counter + 1;
 
         loop {
+            println!("{:?}", program.ops[pc]);
             let should_return = match self.run_op(fp, program.ops[pc]) {
                 Ok(x) => x,
                 Err(mut err) => {
@@ -289,6 +316,8 @@ where
                     return Err(err);
                 }
             };
+            println!("{:?}", self.stack.data);
+            println!("{:?}", self.heap.data);
 
             if should_return {
                 self.stack.shrink_vars_to(fp);
@@ -303,20 +332,18 @@ where
     #[inline]
     pub fn run_op(&mut self, fp: u32, opcode: Opcode) -> Result<bool, Error> {
         match opcode {
-            Opcode::Function(_) => {}
+            Opcode::Func(_) => {}
 
             Opcode::StackAlloc(space) => {
                 self.stack.add_var_dyn(space);
             }
             Opcode::StackAllocPtr(space) => {
                 let var = self.stack.add_var_dyn(space);
-                self.stack
-                    .push_word(VarPointer::new_stack(var.idx, 0).into());
+                self.stack.push_word(VarPointer::new_stack(var, 0).into());
             }
             Opcode::Alloc(space) => {
                 let var = self.heap.add_var_dyn(space);
-                self.stack
-                    .push_word(VarPointer::new_heap(var.idx, 0).into());
+                self.stack.push_word(VarPointer::new_heap(var, 0).into());
             }
 
             Opcode::MakeTempIntWord(value) => {
@@ -389,8 +416,62 @@ where
             Opcode::RemoveCallstackDesc => {
                 self.callstack.pop();
             }
+
+            Opcode::Ecall(0) => {
+                let word = self.stack.pop_word()?;
+                write!(self.stdout, "{}", word as i64)
+                    .map_err(|err| error!("WriteFailed", "failed to write to stdout ({})", err))?;
+            }
+            Opcode::Ecall(call) => {
+                return err!("InvalidEnviromentCall", "invalid ecall value of {}", call);
+            }
         }
 
         return Ok(false);
     }
+}
+
+#[test]
+pub fn simple_read_write() {
+    let mut writer = StringWriter::new();
+    let mut runtime = Runtime::new(&mut writer);
+
+    let program = Program::new(
+        vec!["main.c"],
+        vec!["".to_string()],
+        vec!["main"],
+        vec![
+            Opcode::Func(FuncDesc {
+                file: 0,
+                line: 1,
+                name: 0,
+            }),
+            Opcode::StackAlloc(8),
+            Opcode::Alloc(8),
+            Opcode::SetLocalWord {
+                var_offset: 0,
+                offset: 0,
+            },
+            Opcode::MakeTempIntWord(12),
+            Opcode::GetLocalWord {
+                var_offset: 0,
+                offset: 0,
+            },
+            Opcode::SetWord { offset: 0 },
+            Opcode::GetLocalWord {
+                var_offset: 0,
+                offset: 0,
+            },
+            Opcode::GetWord { offset: 0 },
+            Opcode::Ecall(0),
+            Opcode::Ret,
+        ],
+    );
+
+    match runtime.run_program(program) {
+        Err(x) => panic!("got error: {:?}", x),
+        _ => {}
+    }
+
+    assert_eq!(writer.to_string(), "12");
 }

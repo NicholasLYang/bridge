@@ -4,7 +4,7 @@ use core::str;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
-    Function(FuncDesc), // Function header used for callstack manipulation
+    Func(FuncDesc), // Function header used for callstack manipulation
 
     StackAlloc(u32),    // Allocates space on the stack
     StackAllocPtr(u32), // Allocates space on the stack, then pushes a pointer to that space onto the stack
@@ -12,16 +12,18 @@ pub enum Opcode {
 
     MakeTempIntWord(i64), // Make a temporary integer
 
-    GetLocalWord { var_offset: i32, offset: u32 },
-    SetLocalWord { var_offset: i32, offset: u32 },
+    GetLocalWord { var_offset: i32, offset: u32 }, // Reads a word from a variable on the stack
+    SetLocalWord { var_offset: i32, offset: u32 }, // Pops a temporary word off the stack, then sets section of variable on the stack to that value
 
-    GetWord { offset: i32 },
-    SetWord { offset: i32 },
+    GetWord { offset: i32 }, // Pops a temporary word off the stack, then reads memory at that word's location
+    SetWord { offset: i32 }, // Pops a temporary word off the stack, then sets the value at that word's location to the value of the next word on the stack (which is also popped)
 
-    Ret,
+    Ret, // Returns to caller
 
     AddCallstackDesc(FuncDesc),
     RemoveCallstackDesc,
+
+    Ecall(u32),
 }
 
 #[derive(Debug, Clone, Copy)]
