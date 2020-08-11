@@ -32,9 +32,8 @@ pub enum EntryType {
     Function {
         // Index into function array
         index: usize,
-        params_type: TypeId,
+        params_type: Vec<TypeId>,
         return_type: TypeId,
-        type_: TypeId,
     },
     Var {
         var_type: TypeId,
@@ -145,13 +144,7 @@ impl SymbolTable {
         );
     }
 
-    pub fn insert_function(
-        &mut self,
-        name: Name,
-        params_type: TypeId,
-        return_type: TypeId,
-        type_: TypeId,
-    ) {
+    pub fn insert_function(&mut self, name: Name, params_type: Vec<TypeId>, return_type: TypeId) {
         if self.lookup_name(name).is_none() {
             self.scopes[self.current_scope].symbols.insert(
                 name,
@@ -161,7 +154,6 @@ impl SymbolTable {
                         index: self.function_index,
                         params_type,
                         return_type,
-                        type_,
                     },
                 },
             );

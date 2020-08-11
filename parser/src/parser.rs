@@ -245,7 +245,6 @@ impl<'input> Parser<'input> {
             Some((Token::Fun, loc)) => self.function(loc),
             Some((Token::Let, loc)) => self.let_stmt(loc),
             Some((Token::Return, loc)) => self.return_stmt(loc),
-            Some((Token::Export, loc)) => self.export_stmt(loc),
             Some((Token::If, loc)) => {
                 let if_expr = self.if_expr(loc)?;
                 Ok(Loc {
@@ -292,31 +291,6 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn export_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
-        let tok = self.bump()?;
-        match tok {
-            Some((Token::Ident(name), _)) => {
-                let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
-                Ok(Loc {
-                    location: LocationRange(left.0, right.1),
-                    inner: Stmt::Export(name),
-                })
-            }
-            Some((token, location)) => {
-                self.pushback((token.clone(), location.clone()));
-                Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
-                    expected_tokens: format!("{}", TokenDiscriminants::Ident),
-                    location,
-                })
-            }
-            None => Err(ParseError::EndOfFile {
-                expected_tokens: vec![TokenDiscriminants::Ident],
-            }),
-        }
-    }
-
     fn return_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
         let expr = self.expr()?;
         let (_, right) = self.expect(TokenDiscriminants::Semicolon)?;
@@ -327,13 +301,16 @@ impl<'input> Parser<'input> {
     }
 
     fn let_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
-        let (id, _) = self.id()?;
+        let (id, id_loc) = self.id()?;
+        let (type_sig, _) = self
+            .type_sig()?
+            .ok_or(ParseError::TypeSigMandatory { location: id_loc })?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
         self.expect(TokenDiscriminants::Semicolon)?;
         Ok(Loc {
             location: LocationRange(left.0, rhs_expr.location.1),
-            inner: Stmt::Asgn(id, rhs_expr),
+            inner: Stmt::Asgn(id, type_sig, rhs_expr),
         })
     }
 

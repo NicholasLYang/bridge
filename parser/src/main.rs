@@ -23,6 +23,7 @@ mod lexer;
 mod parser;
 mod printer;
 mod symbol_table;
+mod typechecker;
 mod utils;
 
 fn main() -> Result<(), io::Error> {

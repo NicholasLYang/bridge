@@ -11,7 +11,6 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
         Type::Bool => "bool".to_string(),
         Type::Char => "char".to_string(),
         Type::String => "string".to_string(),
-        Type::Var(id) => format!("var({})", id),
         Type::Array(type_id) => format!("[{}]", type_to_string(name_table, type_table, *type_id)),
         Type::Record(fields) => {
             let fields_str = fields
@@ -30,11 +29,6 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
                 .map(|type_id| type_to_string(name_table, type_table, *type_id))
                 .join(", ");
             format!("({})", elem_str)
-        }
-        Type::Arrow(params_type, return_type) => {
-            let params_str = type_to_string(name_table, type_table, *params_type);
-            let return_str = type_to_string(name_table, type_table, *return_type);
-            format!("{} => {}", params_str, return_str)
         }
         Type::Solved(type_id) => type_to_string(name_table, type_table, *type_id),
     }
