@@ -1,7 +1,7 @@
+use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::CharIndices;
-use utils::NameTable;
 
 #[derive(Clone, Debug, PartialEq, EnumDiscriminants, Serialize, Deserialize)]
 #[strum_discriminants(derive(Serialize, Deserialize))]
@@ -16,6 +16,7 @@ pub enum Token {
     Struct,
     Let,
     While,
+    Fun,
     Ident(usize),
     Float(f32),
     Integer(i32),
@@ -71,6 +72,7 @@ impl Display for TokenDiscriminants {
                 TokenDiscriminants::Struct => "struct",
                 TokenDiscriminants::Let => "let",
                 TokenDiscriminants::While => "while",
+                TokenDiscriminants::Fun => "fun",
                 TokenDiscriminants::Ident => "identifier",
                 TokenDiscriminants::Float => "float",
                 TokenDiscriminants::Integer => "int",
@@ -344,6 +346,7 @@ impl<'input> Lexer<'input> {
             "true" => Token::True,
             "let" => Token::Let,
             "while" => Token::While,
+            "fun" => Token::Fun,
             "export" => Token::Export,
             ident => {
                 let ident = ident.to_string();

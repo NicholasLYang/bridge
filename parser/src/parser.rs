@@ -1,10 +1,9 @@
-use crate::ast::{Expr, Name, Op, Pat, Stmt, TypeSig, Value};
+use crate::ast::{Expr, Loc, Name, Op, Program, Stmt, TypeDef, TypeSig, UnaryOp, Value};
 use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
-use ast::{Loc, Program, TypeDef, UnaryOp};
-use printer::token_to_string;
+use crate::printer::token_to_string;
+use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use utils::NameTable;
 
 pub struct Parser<'input> {
     pub lexer: Lexer<'input>,
@@ -42,6 +41,8 @@ pub enum ParseError {
     LexicalError { err: LexicalError },
     #[fail(display = "Should not be reachable")]
     NotReachable,
+    #[fail(display = "{}: Type signature is mandatory", location)]
+    TypeSigMandatory { location: LocationRange },
 }
 
 impl From<LexicalError> for ParseError {
@@ -241,6 +242,7 @@ impl<'input> Parser<'input> {
     pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, ParseError> {
         let tok = self.bump()?;
         let res = match tok {
+            Some((Token::Fun, loc)) => self.function(loc),
             Some((Token::Let, loc)) => self.let_stmt(loc),
             Some((Token::Return, loc)) => self.return_stmt(loc),
             Some((Token::Export, loc)) => self.export_stmt(loc),
@@ -325,36 +327,14 @@ impl<'input> Parser<'input> {
     }
 
     fn let_stmt(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
-        let pat = self.pattern()?;
+        let (id, _) = self.id()?;
         self.expect(TokenDiscriminants::Equal)?;
         let rhs_expr = self.expr()?;
-        if let Loc {
-            location,
-            inner:
-                Expr::Function {
-                    params,
-                    return_type,
-                    body,
-                },
-        } = rhs_expr
-        {
-            match pat {
-                Pat::Id(name, None, _) => Ok(Loc {
-                    location: LocationRange(left.0, location.1),
-                    inner: Stmt::Function(name, params, return_type, body),
-                }),
-                Pat::Id(_, _, _) => Err(ParseError::FuncBindingTypeSig { location }),
-                Pat::Record(_, _, location) | Pat::Empty(location) | Pat::Tuple(_, location) => {
-                    Err(ParseError::DestructureFunction { location })
-                }
-            }
-        } else {
-            self.expect(TokenDiscriminants::Semicolon)?;
-            Ok(Loc {
-                location: LocationRange(left.0, rhs_expr.location.1),
-                inner: Stmt::Asgn(pat, rhs_expr),
-            })
-        }
+        self.expect(TokenDiscriminants::Semicolon)?;
+        Ok(Loc {
+            location: LocationRange(left.0, rhs_expr.location.1),
+            inner: Stmt::Asgn(id, rhs_expr),
+        })
     }
 
     fn expression_stmt(&mut self) -> Result<Loc<Stmt>, ParseError> {
@@ -368,7 +348,6 @@ impl<'input> Parser<'input> {
 
     fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
         match self.bump()? {
-            Some((Token::Slash, left)) => self.function(left),
             Some((Token::LBrace, left)) => self.expr_block(left),
             Some((Token::If, left)) => self.if_expr(left),
             Some((Token::Ident(id), left)) => {
@@ -445,22 +424,32 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn function(&mut self, left: LocationRange) -> Result<Loc<Expr>, ParseError> {
-        let params = self.pattern()?;
-        let return_type = self.type_sig()?;
-        self.expect(TokenDiscriminants::FatArrow)?;
+    fn func_params(&mut self) -> Result<Loc<(Name, Loc<TypeSig>)>, ParseError> {
+        let (id, id_loc) = self.id()?;
+        let (type_sig, type_sig_loc) = self
+            .type_sig()?
+            .ok_or(ParseError::TypeSigMandatory { location: id_loc })?;
+        Ok(Loc {
+            location: LocationRange(id_loc.0, type_sig_loc.1),
+            inner: (id, type_sig),
+        })
+    }
+
+    fn function(&mut self, left: LocationRange) -> Result<Loc<Stmt>, ParseError> {
+        let (id, _) = self.id()?;
+        self.expect(TokenDiscriminants::LParen)?;
+        let (params, params_loc) = self.comma(&Self::func_params, Token::RParen)?;
+        let (return_type, _) = self.type_sig()?.ok_or(ParseError::TypeSigMandatory {
+            location: params_loc,
+        })?;
         let token = self.bump()?;
         let body = match token {
             Some((Token::LBrace, left)) => self.expr_block(left)?,
-            Some((Token::LParen, left)) => {
-                let mut expr = self.expr()?;
-                let (_, right) = self.expect(TokenDiscriminants::RParen)?;
-                expr.location = LocationRange(left.0, right.1);
-                expr
-            }
             Some((token, left)) => {
                 self.pushback((token, left));
-                self.expr()?
+                let expr = self.expr()?;
+                self.expect(TokenDiscriminants::Semicolon)?;
+                expr
             }
             // TODO: Streamline error reporting. I should group the
             // tokens into ones expected for each kind of syntax rule.
@@ -483,11 +472,7 @@ impl<'input> Parser<'input> {
         };
         Ok(Loc {
             location: LocationRange(left.0, body.location.1),
-            inner: Expr::Function {
-                params,
-                return_type: return_type.map(|(return_type, _)| return_type),
-                body: Box::new(body),
-            },
+            inner: Stmt::Function(id, params, return_type, Box::new(body)),
         })
     }
 
@@ -759,72 +744,6 @@ impl<'input> Parser<'input> {
         Ok((field_name, expr))
     }
 
-    fn pattern(&mut self) -> Result<Pat, ParseError> {
-        let (token, left) = if let Some((token, loc)) = self.bump()? {
-            (token, loc)
-        } else {
-            return Err(ParseError::EndOfFile {
-                expected_tokens: vec![
-                    TokenDiscriminants::LParen,
-                    TokenDiscriminants::LBrace,
-                    TokenDiscriminants::Ident,
-                ],
-            });
-        };
-        match token {
-            Token::LParen => {
-                if let Some((_, right)) = self.match_one(TokenDiscriminants::RParen)? {
-                    return Ok(Pat::Empty(LocationRange(left.0, right.0)));
-                }
-
-                let (mut pats, right) = self.comma::<Pat>(&Self::pattern, Token::RParen)?;
-                // If the pattern is singular, i.e. let (a) = 10, then
-                // we treat it as a single id
-                if pats.len() == 1 {
-                    Ok(pats.pop().unwrap())
-                } else {
-                    Ok(Pat::Tuple(pats, LocationRange(left.0, right.1)))
-                }
-            }
-            Token::LBrace => {
-                let (fields, right) = self.comma::<Name>(&Self::record_pattern, Token::RBrace)?;
-                if let Some((type_sig, right)) = self.type_sig()? {
-                    Ok(Pat::Record(
-                        fields,
-                        Some(type_sig),
-                        LocationRange(left.0, right.1),
-                    ))
-                } else {
-                    Ok(Pat::Record(fields, None, LocationRange(left.0, right.1)))
-                }
-            }
-            Token::Ident(name) => {
-                if let Some((type_sig, right)) = self.type_sig()? {
-                    Ok(Pat::Id(
-                        name,
-                        Some(type_sig),
-                        LocationRange(left.0, right.1),
-                    ))
-                } else {
-                    Ok(Pat::Id(name, None, left))
-                }
-            }
-            token => {
-                return Err(ParseError::UnexpectedToken {
-                    token: token_to_string(&self.lexer.name_table, &token),
-                    token_type: token.into(),
-                    location: left,
-                    expected_tokens: format!(
-                        "{}, {}, {}",
-                        TokenDiscriminants::LParen,
-                        TokenDiscriminants::LBrace,
-                        TokenDiscriminants::Ident,
-                    ),
-                })
-            }
-        }
-    }
-
     fn record_pattern(&mut self) -> Result<Name, ParseError> {
         let token = self.bump()?;
         match token {
@@ -859,15 +778,7 @@ impl<'input> Parser<'input> {
                     location,
                     inner: TypeSig::Name(name),
                 };
-                if self.match_one(TokenDiscriminants::Arrow)?.is_some() {
-                    let return_type = self.type_()?;
-                    Ok(Loc {
-                        location: LocationRange(location.0, return_type.location.1),
-                        inner: TypeSig::Arrow(vec![sig], Box::new(return_type)),
-                    })
-                } else {
-                    Ok(sig)
-                }
+                Ok(sig)
             }
             Some((Token::LBracket, left)) => {
                 let array_type = self.type_()?;
@@ -878,12 +789,10 @@ impl<'input> Parser<'input> {
                 })
             }
             Some((Token::LParen, left)) => {
-                let (param_types, _) = self.comma(&Self::type_, Token::RParen)?;
-                self.expect(TokenDiscriminants::Arrow)?;
-                let return_type = self.type_()?;
+                let (_, right) = self.expect(TokenDiscriminants::RParen)?;
                 Ok(Loc {
-                    location: LocationRange(left.0, return_type.location.1),
-                    inner: TypeSig::Arrow(param_types, Box::new(return_type)),
+                    location: LocationRange(left.0, right.1),
+                    inner: TypeSig::Empty,
                 })
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {
@@ -923,7 +832,7 @@ impl<'input> Parser<'input> {
 
 #[cfg(test)]
 mod tests {
-    use ast::{Expr, Loc, Op, Pat, Stmt, TypeSig, Value};
+    use ast::{Expr, Loc, Op, Stmt, TypeSig, Value};
     use lexer::{Lexer, Location, LocationRange};
     use parser::{ParseError, Parser};
     use std::ffi::OsStr;

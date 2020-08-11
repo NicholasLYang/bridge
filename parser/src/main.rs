@@ -13,10 +13,34 @@ extern crate strum_macros;
 extern crate serde;
 extern crate serde_json;
 
+use crate::parser::Parser;
+use std::env;
+use std::fs::{self, File};
+use std::io;
+
+mod ast;
 mod lexer;
 mod parser;
-mod ast;
+mod printer;
+mod symbol_table;
+mod utils;
 
-fn main() {
-  println!("Hello World!");
+fn main() -> Result<(), io::Error> {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        println!("Usage: saber <file>");
+    } else {
+        let file_name = &args[1];
+        let contents = fs::read_to_string(file_name)?;
+        let lexer = lexer::Lexer::new(&contents);
+        let mut parser = Parser::new(lexer);
+        if let Ok(program) = parser.program() {
+            for error in &program.errors {
+                println!("{}", error);
+            }
+            println!("{:?}", program.stmts);
+        }
+    };
+    Ok(())
 }

@@ -1,8 +1,8 @@
-use lexer::LocationRange;
-use parser::ParseError;
+use crate::lexer::LocationRange;
+use crate::parser::ParseError;
+//use crate::typechecker::TypeError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use typechecker::TypeError;
 
 pub type Name = usize;
 pub type TypeId = usize;
@@ -21,12 +21,12 @@ pub struct Program {
     pub errors: Vec<ParseError>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+/*#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ProgramT {
     pub stmts: Vec<Loc<StmtT>>,
     pub named_types: Vec<(Name, TypeId)>,
     pub errors: Vec<TypeError>,
-}
+}*/
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
@@ -34,7 +34,12 @@ pub enum Stmt {
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
     Block(Vec<Loc<Stmt>>),
-    Function(Name, Vec<(Name, TypeSig)>, Option<Loc<TypeSig>>, Box<Loc<Expr>>),
+    Function(
+        Name,
+        Vec<Loc<(Name, Loc<TypeSig>)>>,
+        Loc<TypeSig>,
+        Box<Loc<Expr>>,
+    ),
     Export(Name),
 }
 
@@ -71,11 +76,6 @@ pub enum Expr {
     UnaryOp {
         op: UnaryOp,
         rhs: Box<Loc<Expr>>,
-    },
-    Function {
-        params: Pat,
-        return_type: Option<Loc<TypeSig>>,
-        body: Box<Loc<Expr>>,
     },
     Call {
         callee: Box<Loc<Expr>>,
@@ -276,20 +276,11 @@ pub enum TypeSig {
     Array(Box<Loc<TypeSig>>),
     Name(Name),
     Empty,
-    Arrow(Vec<Loc<TypeSig>>, Box<Loc<TypeSig>>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TypeDef {
     Struct(Name, Vec<(Name, Loc<TypeSig>)>),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum Pat {
-    Id(Name, Option<Loc<TypeSig>>, LocationRange),
-    Record(Vec<Name>, Option<Loc<TypeSig>>, LocationRange),
-    Tuple(Vec<Pat>, LocationRange),
-    Empty(LocationRange),
 }
 
 // Oy vey, cause Rust doesn't allow enum field access
