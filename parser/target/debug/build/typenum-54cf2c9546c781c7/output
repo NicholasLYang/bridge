@@ -1,2 +1,0 @@
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=/home/runner/SubduedHoarseAutoexec/parser/target/debug/build/typenum-54cf2c9546c781c7/out/consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=/home/runner/SubduedHoarseAutoexec/parser/target/debug/build/typenum-54cf2c9546c781c7/out/op.rs
