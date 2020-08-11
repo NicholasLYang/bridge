@@ -1,4 +1,3 @@
-/target
 **/*.rs.bk
 \#*\#
 
@@ -11,3 +10,4 @@ test.sbr
 .cdmkn
 /build/code.ts
 /build/*.js
+/target
