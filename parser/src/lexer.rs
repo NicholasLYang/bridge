@@ -116,17 +116,17 @@ impl Display for TokenDiscriminants {
 }
 
 #[derive(PartialEq, Clone, Copy, Deserialize, Serialize)]
-pub struct Location(pub usize, pub usize);
+pub struct Location(pub usize);
 
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.0, self.1)
+        write!(f, "{}", self.0)
     }
 }
 
 impl Debug for Location {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.0, self.1)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -165,7 +165,16 @@ pub enum LexicalError {
     InvalidCharacter { ch: char, location: LocationRange },
 
     #[fail(display = "{}: String was not terminated", location)]
-    UnterminatedString { location: Location },
+    UnterminatedString { location: LocationRange },
+}
+
+impl LexicalError {
+    pub fn get_location(&self) -> LocationRange {
+        match self {
+            LexicalError::InvalidCharacter { ch: _, location } => *location,
+            LexicalError::UnterminatedString { location } => *location,
+        }
+    }
 }
 
 pub struct Lexer<'input> {
@@ -174,6 +183,7 @@ pub struct Lexer<'input> {
     pub name_table: NameTable,
     row: usize,
     column: usize,
+    index: usize,
     lookahead: Option<(usize, char)>,
     lookahead2: Option<(usize, char)>,
 }
@@ -189,6 +199,7 @@ impl<'input> Lexer<'input> {
             chars,
             row: 1,
             column: 1,
+            index: 0,
             name_table: NameTable::new(),
             lookahead,
             lookahead2,
@@ -196,13 +207,14 @@ impl<'input> Lexer<'input> {
     }
 
     pub fn get_location(&self) -> Location {
-        Location(self.row, self.column)
+        Location(self.index)
     }
 
     fn bump(&mut self) -> Option<(usize, char)> {
         let next = self.lookahead;
         self.lookahead = self.lookahead2;
         self.lookahead2 = self.chars.next();
+        self.index += 1;
         if let Some((_, '\n')) = next {
             self.row += 1;
             self.column = 0;
@@ -281,7 +293,7 @@ impl<'input> Lexer<'input> {
                 ))
             }
             None => Err(LexicalError::UnterminatedString {
-                location: start_loc,
+                location: LocationRange(start_loc, Location(self.index)),
             }),
         }
     }

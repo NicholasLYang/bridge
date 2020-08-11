@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Loc, Name, Op, Program, Stmt, TypeDef, TypeSig, UnaryOp, Value};
-use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenDiscriminants};
+use crate::lexer::{Lexer, LexicalError, Location, LocationRange, Token, TokenDiscriminants};
 use crate::printer::token_to_string;
 use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
@@ -19,10 +19,11 @@ pub enum ParseError {
     )]
     EndOfFile {
         expected_tokens: Vec<TokenDiscriminants>,
+        location: LocationRange,
     },
     #[fail(
-        display = "{}: Unexpected token {:?}, expected {:?}",
-        location, token, expected_tokens
+        display = "Unexpected token {:?}, expected {:?}",
+        token, expected_tokens
     )]
     UnexpectedToken {
         token: String,
@@ -30,19 +31,35 @@ pub enum ParseError {
         expected_tokens: String,
         location: LocationRange,
     },
-    #[fail(display = "{}: Cannot destructure a function", location)]
-    DestructureFunction { location: LocationRange },
-    #[fail(
-        display = "{}: Cannot have a type signature on a let function binding (use type signatures in the function!)",
-        location
-    )]
-    FuncBindingTypeSig { location: LocationRange },
     #[fail(display = "{}", err)]
     LexicalError { err: LexicalError },
-    #[fail(display = "Should not be reachable")]
-    NotReachable,
-    #[fail(display = "{}: Type signature is mandatory", location)]
+    #[fail(display = "Invalid operator")]
+    InvalidOp {
+        token: Token,
+        location: LocationRange,
+    },
+    #[fail(display = "Type signature is mandatory")]
     TypeSigMandatory { location: LocationRange },
+}
+
+impl ParseError {
+    pub fn get_location(&self) -> LocationRange {
+        match self {
+            ParseError::EndOfFile {
+                expected_tokens: _,
+                location,
+            } => *location,
+            ParseError::UnexpectedToken {
+                token: _,
+                token_type: _,
+                expected_tokens: _,
+                location,
+            } => *location,
+            ParseError::LexicalError { err } => err.get_location(),
+            ParseError::InvalidOp { token: _, location } => *location,
+            ParseError::TypeSigMandatory { location } => *location,
+        }
+    }
 }
 
 impl From<LexicalError> for ParseError {
@@ -85,6 +102,7 @@ impl<'input> Parser<'input> {
         } else {
             Err(ParseError::EndOfFile {
                 expected_tokens: vec![expected],
+                location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
             })
         }
     }
@@ -154,7 +172,7 @@ impl<'input> Parser<'input> {
         Ok(())
     }
 
-    fn lookup_op_token(&mut self, token: Token) -> Result<Op, ParseError> {
+    fn lookup_op_token(&mut self, token: Token, location: LocationRange) -> Result<Op, ParseError> {
         match token {
             Token::EqualEqual => Ok(Op::EqualEqual),
             Token::BangEqual => Ok(Op::BangEqual),
@@ -166,7 +184,7 @@ impl<'input> Parser<'input> {
             Token::GreaterEqual => Ok(Op::GreaterEqual),
             Token::Less => Ok(Op::Less),
             Token::LessEqual => Ok(Op::LessEqual),
-            _ => Err(ParseError::NotReachable),
+            _ => Err(ParseError::InvalidOp { location, token }),
         }
     }
 
@@ -188,8 +206,7 @@ impl<'input> Parser<'input> {
             } else {
                 match self.stmt() {
                     Ok(Some(stmt)) => stmts.push(stmt),
-                    Ok(None) => {}
-                    Err(ParseError::EndOfFile { expected_tokens: _ }) => {
+                    Ok(None) => {
                         let mut errors = Vec::new();
                         std::mem::swap(&mut errors, &mut self.errors);
                         return Ok(Program {
@@ -216,6 +233,7 @@ impl<'input> Parser<'input> {
                 expected_tokens: format!("{}", TokenDiscriminants::Ident),
             }),
             None => Err(ParseError::EndOfFile {
+                location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_tokens: vec![TokenDiscriminants::Ident],
             }),
         }
@@ -242,36 +260,26 @@ impl<'input> Parser<'input> {
     pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, ParseError> {
         let tok = self.bump()?;
         let res = match tok {
-            Some((Token::Fun, loc)) => self.function(loc),
-            Some((Token::Let, loc)) => self.let_stmt(loc),
-            Some((Token::Return, loc)) => self.return_stmt(loc),
+            Some((Token::Fun, loc)) => Some(self.function(loc)),
+            Some((Token::Let, loc)) => Some(self.let_stmt(loc)),
+            Some((Token::Return, loc)) => Some(self.return_stmt(loc)),
             Some((Token::If, loc)) => {
                 let if_expr = self.if_expr(loc)?;
-                Ok(Loc {
+                Some(Ok(Loc {
                     location: if_expr.location,
                     inner: Stmt::Expr(if_expr),
-                })
+                }))
             }
             Some((token, loc)) => {
                 self.pushback((token, loc));
-                self.expression_stmt()
+                Some(self.expression_stmt())
             }
-            None => {
-                return Err(ParseError::EndOfFile {
-                    expected_tokens: vec![
-                        TokenDiscriminants::Let,
-                        TokenDiscriminants::Return,
-                        TokenDiscriminants::Export,
-                    ],
-                })
-            }
+            None => None,
         };
         match res {
-            Ok(res) => Ok(Some(res)),
-            err @ Err(ParseError::EndOfFile { expected_tokens: _ }) => return err.map(Some),
-            Err(err) => {
-                // Special case if the unexpected token is a semicolon
-                // since that's our recovery token
+            Some(Ok(res)) => Ok(Some(res)),
+            None => Ok(None),
+            Some(Err(err)) => {
                 if let ParseError::UnexpectedToken {
                     token: _,
                     token_type,
@@ -279,14 +287,16 @@ impl<'input> Parser<'input> {
                     expected_tokens: _,
                 } = &err
                 {
+                    // Special case if the unexpected token is a semicolon
+                    // since that's our recovery token
                     if token_type == &TokenDiscriminants::Semicolon {
                         self.errors.push(err);
-                        return Ok(None);
+                        return self.stmt();
                     }
                 }
                 self.errors.push(err);
                 self.recover_from_error(TokenDiscriminants::Semicolon)?;
-                Ok(None)
+                self.stmt()
             }
         }
     }
@@ -378,10 +388,20 @@ impl<'input> Parser<'input> {
             // If we're undeniably starting a statement then
             // parse it and push onto the vec
             if let Some(span) =
-                self.match_multiple(vec![Token::Let, Token::Return, Token::Export])?
+                self.match_multiple(vec![Token::Let, Token::Return, Token::While, Token::Export])?
             {
                 self.pushback(span);
-                self.stmt()?.map(|stmt| stmts.push(stmt));
+                let stmt = self.stmt()?.ok_or(ParseError::EndOfFile {
+                    expected_tokens: vec![
+                        TokenDiscriminants::Fun,
+                        TokenDiscriminants::Let,
+                        TokenDiscriminants::While,
+                        TokenDiscriminants::Return,
+                        TokenDiscriminants::RBrace,
+                    ],
+                    location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
+                })?;
+                stmts.push(stmt);
             } else {
                 // Otherwise we could either be in an expr stmt or an ending expr situation
                 let expr = self.expr()?;
@@ -435,6 +455,7 @@ impl<'input> Parser<'input> {
             // expression lookahead token
             None => {
                 return Err(ParseError::EndOfFile {
+                    location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                     expected_tokens: vec![
                         TokenDiscriminants::LBrace,
                         TokenDiscriminants::LParen,
@@ -455,8 +476,10 @@ impl<'input> Parser<'input> {
 
     fn equality(&mut self) -> Result<Loc<Expr>, ParseError> {
         let lhs = self.comparison()?;
-        if let Some((token, _)) = self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])? {
-            let op = self.lookup_op_token(token)?;
+        if let Some((token, loc)) =
+            self.match_multiple(vec![Token::EqualEqual, Token::BangEqual])?
+        {
+            let op = self.lookup_op_token(token, loc)?;
             let rhs = self.comparison()?;
             Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
@@ -473,13 +496,13 @@ impl<'input> Parser<'input> {
 
     fn comparison(&mut self) -> Result<Loc<Expr>, ParseError> {
         let lhs = self.addition()?;
-        if let Some((token, _)) = self.match_multiple(vec![
+        if let Some((token, loc)) = self.match_multiple(vec![
             Token::GreaterEqual,
             Token::Greater,
             Token::Less,
             Token::LessEqual,
         ])? {
-            let op = self.lookup_op_token(token)?;
+            let op = self.lookup_op_token(token, loc)?;
             let rhs = self.addition()?;
             Ok(Loc {
                 location: LocationRange(lhs.location.0, rhs.location.1),
@@ -496,8 +519,8 @@ impl<'input> Parser<'input> {
 
     fn addition(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.multiplication()?;
-        while let Some((token, _)) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
-            let op = self.lookup_op_token(token)?;
+        while let Some((token, loc)) = self.match_multiple(vec![Token::Plus, Token::Minus])? {
+            let op = self.lookup_op_token(token, loc)?;
             let rhs = self.multiplication()?;
             expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
@@ -513,8 +536,8 @@ impl<'input> Parser<'input> {
 
     fn multiplication(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.unary()?;
-        while let Some((token, _)) = self.match_multiple(vec![Token::Times, Token::Div])? {
-            let op = self.lookup_op_token(token)?;
+        while let Some((token, loc)) = self.match_multiple(vec![Token::Times, Token::Div])? {
+            let op = self.lookup_op_token(token, loc)?;
             let rhs = self.unary()?;
             expr = Loc {
                 location: LocationRange(expr.location.0, rhs.location.1),
@@ -533,7 +556,12 @@ impl<'input> Parser<'input> {
             let op = match token {
                 Token::Bang => UnaryOp::Not,
                 Token::Minus => UnaryOp::Minus,
-                _ => return Err(ParseError::NotReachable),
+                _ => {
+                    return Err(ParseError::InvalidOp {
+                        token,
+                        location: left,
+                    })
+                }
             };
             let rhs = self.unary()?;
             Ok(Loc {
@@ -571,6 +599,10 @@ impl<'input> Parser<'input> {
                     }
                     None => {
                         return Err(ParseError::EndOfFile {
+                            location: LocationRange(
+                                self.lexer.get_location(),
+                                self.lexer.get_location(),
+                            ),
                             expected_tokens: vec![TokenDiscriminants::Ident],
                         })
                     }
@@ -598,6 +630,7 @@ impl<'input> Parser<'input> {
             span
         } else {
             return Err(ParseError::EndOfFile {
+                location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_tokens: vec![
                     TokenDiscriminants::True,
                     TokenDiscriminants::False,
@@ -718,6 +751,7 @@ impl<'input> Parser<'input> {
                 expected_tokens: format!("{}", TokenDiscriminants::Ident),
             }),
             _ => Err(ParseError::EndOfFile {
+                location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_tokens: vec![TokenDiscriminants::Ident],
             }),
         }
@@ -769,6 +803,7 @@ impl<'input> Parser<'input> {
                 ),
             }),
             None => Err(ParseError::EndOfFile {
+                location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_tokens: vec![TokenDiscriminants::LBracket, TokenDiscriminants::Ident],
             }),
         }
