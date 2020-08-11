@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+\#*\#
+
+/build/node_modules
+*.wasm
+*.wat
+\.#*
+test.sbr
+.idea
+.cdmkn
+/build/code.ts
+/build/*.js
