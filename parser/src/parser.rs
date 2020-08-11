@@ -551,8 +551,8 @@ impl<'input> Parser<'input> {
     fn call(&mut self) -> Result<Loc<Expr>, ParseError> {
         let mut expr = self.primary()?;
         loop {
-            if let Some((_, left)) = self.match_one(TokenDiscriminants::LParen)? {
-                expr = self.finish_call(expr, left)?;
+            if self.match_one(TokenDiscriminants::LParen)?.is_some() {
+                expr = self.finish_call(expr)?;
             } else if self.match_one(TokenDiscriminants::Dot)?.is_some() {
                 match self.bump()? {
                     Some((Token::Ident(name), right)) => {
@@ -582,27 +582,13 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn finish_call(
-        &mut self,
-        callee: Loc<Expr>,
-        left: LocationRange,
-    ) -> Result<Loc<Expr>, ParseError> {
-        let args = {
-            let (mut exprs, right) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
-            if exprs.len() == 1 {
-                exprs.remove(0)
-            } else {
-                Loc {
-                    location: LocationRange(left.0, right.1),
-                    inner: Expr::Tuple(exprs),
-                }
-            }
-        };
+    fn finish_call(&mut self, callee: Loc<Expr>) -> Result<Loc<Expr>, ParseError> {
+        let (args, args_loc) = self.comma::<Loc<Expr>>(&Self::expr, Token::RParen)?;
         Ok(Loc {
-            location: LocationRange(callee.location.0, args.location.1),
+            location: LocationRange(callee.location.0, args_loc.1),
             inner: Expr::Call {
                 callee: Box::new(callee),
-                args: Box::new(args),
+                args,
             },
         })
     }

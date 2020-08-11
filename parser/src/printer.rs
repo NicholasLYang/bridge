@@ -12,6 +12,14 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
         Type::Char => "char".to_string(),
         Type::String => "string".to_string(),
         Type::Array(type_id) => format!("[{}]", type_to_string(name_table, type_table, *type_id)),
+        Type::Arrow(params, return_type) => {
+            let params_str = params
+                .iter()
+                .map(|t| type_to_string(name_table, type_table, *t))
+                .join(", ");
+            let return_str = type_to_string(name_table, type_table, *return_type);
+            format!("({}) => {}", params_str, return_str)
+        }
         Type::Record(fields) => {
             let fields_str = fields
                 .iter()

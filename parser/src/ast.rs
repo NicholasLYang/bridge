@@ -72,7 +72,7 @@ pub enum Expr {
     },
     Call {
         callee: Box<Loc<Expr>>,
-        args: Box<Loc<Expr>>,
+        args: Vec<Loc<Expr>>,
     },
     Field(Box<Loc<Expr>>, Name),
     Record {
@@ -123,7 +123,7 @@ pub enum ExprT {
     Field(Box<Loc<ExprT>>, Name, TypeId),
     Call {
         callee: Box<Loc<ExprT>>,
-        args: Box<Loc<ExprT>>,
+        args: Vec<Loc<ExprT>>,
         type_: TypeId,
     },
     Tuple(Vec<Loc<ExprT>>, TypeId),

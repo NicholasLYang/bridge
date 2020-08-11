@@ -43,7 +43,7 @@ pub enum TypeError {
     #[fail(display = "Field {} does not exist in record", name)]
     FieldDoesNotExist { name: String },
     #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: Type },
+    NotARecord { type_: String },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -109,8 +109,8 @@ pub fn is_ref_type(type_id: TypeId) -> bool {
 
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
-        let mut symbol_table = SymbolTable::new();
-        let mut type_table = TypeTable::new();
+        let symbol_table = SymbolTable::new();
+        let type_table = TypeTable::new();
 
         TypeChecker {
             symbol_table,
@@ -188,7 +188,6 @@ impl TypeChecker {
         for stmt in program.stmts {
             match self.stmt(stmt) {
                 Ok(stmt_t) => {
-                    let mut stmt_t = stmt_t;
                     typed_stmts.push(stmt_t);
                 }
                 Err(err) => {
@@ -352,7 +351,7 @@ impl TypeChecker {
             }
         } else {
             Err(TypeError::NotARecord {
-                type_: self.type_table.get_type(record_type).clone(),
+                type_: type_to_string(&self.name_table, &self.type_table, record_type),
             })
         }
     }
@@ -421,7 +420,7 @@ impl TypeChecker {
         std::mem::swap(&mut old_return_type, &mut self.return_type);
         // If the body type is unit, we don't try to unify the body type
         // with return type.
-        let return_type = if body_type != UNIT_INDEX {
+        if body_type != UNIT_INDEX {
             self.unify(old_return_type.unwrap(), body_type)
                 .ok_or_else(|| {
                     let type1 = type_to_string(
@@ -556,23 +555,37 @@ impl TypeChecker {
                 let typed_callee = self.expr(*callee)?;
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
-                    Type::Arrow(params_type, return_type) => (*params_type, *return_type),
+                    Type::Arrow(params_type, return_type) => (params_type.clone(), *return_type),
                     _ => return Err(TypeError::CalleeNotFunction),
                 };
-                let typed_args = self.expr(*args)?;
-                let args_type = typed_args.inner.get_type();
-                if self.is_unifiable(params_type, args_type) {
+                let mut typed_args = Vec::new();
+                for arg in args {
+                    typed_args.push(self.expr(arg)?);
+                }
+                let args_type = typed_args
+                    .iter()
+                    .map(|arg| arg.inner.get_type())
+                    .collect::<Vec<TypeId>>();
+                if self.unify_type_vectors(&params_type, &args_type).is_some() {
                     Ok(Loc {
                         location,
                         inner: ExprT::Call {
                             callee: Box::new(typed_callee),
-                            args: Box::new(typed_args),
+                            args: typed_args,
                             type_: return_type,
                         },
                     })
                 } else {
-                    let type1 = type_to_string(&self.name_table, &self.type_table, params_type);
-                    let type2 = type_to_string(&self.name_table, &self.type_table, args_type);
+                    let type1 = params_type
+                        .iter()
+                        .map(|t| type_to_string(&self.name_table, &self.type_table, *t))
+                        .collect::<Vec<String>>()
+                        .join(",");
+                    let type2 = args_type
+                        .iter()
+                        .map(|t| type_to_string(&self.name_table, &self.type_table, *t))
+                        .collect::<Vec<String>>()
+                        .join(",");
                     Err(TypeError::UnificationFailure {
                         location,
                         type1,
@@ -585,7 +598,7 @@ impl TypeChecker {
                 let mut typed_stmts = Vec::new();
                 let previous_scope = self.symbol_table.push_scope(false);
                 for stmt in stmts {
-                    typed_stmts.append(&mut self.stmt(stmt)?);
+                    typed_stmts.push(self.stmt(stmt)?);
                 }
                 let (type_, typed_end_expr) = if let Some(expr) = end_expr {
                     let typed_expr = self.expr(*expr)?;
@@ -685,26 +698,27 @@ impl TypeChecker {
             }
             Expr::Field(lhs, name) => {
                 let lhs_t = self.expr(*lhs)?;
-                let type_ = if let Type::Record(fields) =
-                    self.type_table.get_type(lhs_t.inner.get_type())
-                {
-                    let field = fields.iter().find(|(field_name, _)| *field_name == name);
+                let type_id = lhs_t.inner.get_type();
+                match self.type_table.get_type(type_id) {
+                    Type::Record(fields) => {
+                        let field = fields.iter().find(|(field_name, _)| *field_name == name);
 
-                    if let Some(field) = field {
-                        field.1
-                    } else {
-                        let name_str = self.name_table.get_str(&name);
-                        return Err(TypeError::FieldDoesNotExist {
-                            name: name_str.to_string(),
-                        });
+                        if let Some(field) = field {
+                            Ok(Loc {
+                                location,
+                                inner: ExprT::Field(Box::new(lhs_t), name, field.1),
+                            })
+                        } else {
+                            let name_str = self.name_table.get_str(&name);
+                            Err(TypeError::FieldDoesNotExist {
+                                name: name_str.to_string(),
+                            })
+                        }
                     }
-                } else {
-                    self.get_fresh_type_var()
-                };
-                Ok(Loc {
-                    location,
-                    inner: ExprT::Field(Box::new(lhs_t), name, type_),
-                })
+                    _ => Err(TypeError::NotARecord {
+                        type_: type_to_string(&self.name_table, &self.type_table, type_id),
+                    }),
+                }
             }
         }
     }
@@ -808,7 +822,7 @@ impl TypeChecker {
             }
             (Type::Arrow(param_type1, return_type1), Type::Arrow(param_type2, return_type2)) => {
                 match (
-                    self.unify(param_type1, param_type2),
+                    self.unify_type_vectors(&param_type1, &param_type2),
                     self.unify(return_type1, return_type2),
                 ) {
                     (Some(param_type), Some(return_type)) => {
@@ -820,14 +834,6 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
-            (Type::Var(_), t) => {
-                self.type_table.update(type_id1, t.clone());
-                Some(type_id2)
-            }
-            (t, Type::Var(_)) => {
-                self.type_table.update(type_id2, t.clone());
-                Some(type_id1)
-            }
             _ => None,
         }
     }
