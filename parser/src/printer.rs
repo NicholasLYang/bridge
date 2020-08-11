@@ -1,5 +1,5 @@
 use crate::ast::{Type, TypeId};
-use crate::lexer::Token;
+use crate::lexer::{Token, TokenD};
 use crate::utils::{NameTable, TypeTable};
 use itertools::Itertools;
 
@@ -93,4 +93,8 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::Slash => "\\".to_string(),
         Token::String(s) => format!("\"{}\"", s),
     }
+}
+
+pub fn expected_tokens_to_string(name_table: &NameTable, tokens: &Vec<TokenD>) -> String {
+    tokens.iter().map(|token| format!("{}", token)).join(", ")
 }

@@ -20,7 +20,7 @@ use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::env;
-use std::fs::{self, File};
+use std::fs;
 use std::io;
 
 mod ast;
