@@ -2,9 +2,10 @@ use crate::util::*;
 use core::ops::Deref;
 use core::str;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Function(FuncDesc),
+    MakeInt(i32),
 }
 
 #[derive(Debug, Clone, Copy)]
