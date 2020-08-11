@@ -39,7 +39,8 @@ fn main() -> Result<(), io::Error> {
             for error in &program.errors {
                 println!("{}", error);
             }
-            println!("{:?}", program.stmts);
+            let json = serde_json::to_string_pretty(&program.stmts)?;
+            println!("{}", json);
         }
     };
     Ok(())
