@@ -5,7 +5,11 @@ use core::str;
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Function(FuncDesc),
-    MakeInt(i32),
+    MakeInt(i64),
+    GetLocal { var_offset: i32, offset: u32 },
+    SetLocal { var_offset: i32, offset: u32 },
+    AddCallstackDesc(FuncDesc),
+    RemoveCallstackDesc,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -13,6 +17,7 @@ pub struct Program<'a> {
     pub data: &'a [u8],
     pub files: &'a [&'a str],
     pub strings: &'a [&'a str],
+    pub functions: &'a [&'a str],
     pub ops: &'a [Opcode],
     unused: (), // prevents construction without Program::new
 }
@@ -21,11 +26,13 @@ impl<'a> Program<'a> {
     pub fn new(
         files: Vec<impl Deref<Target = str>>,
         strings: Vec<impl Deref<Target = str>>,
+        functions: Vec<impl Deref<Target = str>>,
         ops: Vec<Opcode>,
     ) -> Self {
         let mut bytes = Vec::new();
         let mut file_ranges = Vec::new();
         let mut string_ranges = Vec::new();
+        let mut function_ranges = Vec::new();
 
         for file in files {
             let start = bytes.len();
@@ -37,6 +44,12 @@ impl<'a> Program<'a> {
             let start = bytes.len();
             bytes.extend_from_slice(string.as_bytes());
             string_ranges.push(start..bytes.len());
+        }
+
+        for function in functions {
+            let start = bytes.len();
+            bytes.extend_from_slice(function.as_bytes());
+            function_ranges.push(start..bytes.len());
         }
 
         let data: &[u8] = Box::leak(bytes.into());
@@ -53,12 +66,19 @@ impl<'a> Program<'a> {
             .collect();
         let strings: &[&str] = Box::leak(strings.into());
 
+        let functions: Vec<&str> = function_ranges
+            .into_iter()
+            .map(|range| unsafe { str::from_utf8_unchecked(&data[range]) })
+            .collect();
+        let functions: &[&str] = Box::leak(functions.into());
+
         let ops: &[Opcode] = Box::leak(ops.into());
 
         Self {
             data,
             files,
             strings,
+            functions,
             ops,
             unused: (),
         }
