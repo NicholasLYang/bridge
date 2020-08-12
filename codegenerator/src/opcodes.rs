@@ -1,11 +1,13 @@
-#[derive(Debug, Clone, Copy)]
+use serde::*;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CallFrame {
     pub file: u32,
     pub name: u32,
     pub line: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PseudoOp {
     StackAlloc(u32),
     StackAllocPtr(u32),
