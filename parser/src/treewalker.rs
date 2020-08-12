@@ -58,6 +58,16 @@ impl TreeWalker {
         None
     }
 
+    fn update_in_scope(&mut self, name: &Name, value: Value) {
+        let mut scope_index = Some(self.current_scope);
+        while let Some(s) = scope_index {
+            if self.scopes[s].variables.contains_key(name) {
+                self.scopes[s].variables.insert(*name, value.clone());
+            }
+            scope_index = self.scopes[s].parent;
+        }
+    }
+
     fn interpret_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<(), WalkerError> {
         match &stmt.inner {
             StmtT::Def(name, rhs) => {
@@ -65,6 +75,10 @@ impl TreeWalker {
                 self.scopes[self.current_scope]
                     .variables
                     .insert(*name, rhs_val);
+            }
+            StmtT::Asgn(name, rhs) => {
+                let rhs_val = self.interpret_expr(rhs)?;
+                self.update_in_scope(name, rhs_val);
             }
             StmtT::Expr(expr) => {
                 let res = self.interpret_expr(expr)?;

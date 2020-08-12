@@ -69,10 +69,6 @@ impl TypeTable {
         index
     }
 
-    pub fn update(&mut self, id: TypeId, type_: Type) {
-        self.table[id] = type_
-    }
-
     pub fn get_type(&self, id: TypeId) -> &Type {
         &self.table[id]
     }
