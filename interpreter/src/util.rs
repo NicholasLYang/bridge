@@ -1,9 +1,9 @@
+use codegenerator::opcodes::CallFrame;
 use std::io::Write;
 
 #[derive(Debug, Clone, Copy)]
 pub struct FuncDesc {
     pub file: u32,
-    pub line: u32,
     pub name: u32,
 }
 
@@ -24,7 +24,7 @@ pub fn u32_to_u16_tup(value: u32) -> (u16, u16) {
 pub struct Error {
     pub short_name: String,
     pub message: String,
-    pub stack_trace: Vec<FuncDesc>,
+    pub stack_trace: Vec<CallFrame>,
 }
 
 impl Error {
