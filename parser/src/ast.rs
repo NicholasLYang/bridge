@@ -34,12 +34,12 @@ pub enum Stmt {
     Asgn(Name, Loc<Expr>),
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
-    Function(
-        Name,
-        Vec<Loc<(Name, Loc<TypeSig>)>>,
-        Loc<TypeSig>,
-        Box<Loc<Expr>>,
-    ),
+    Function {
+        name: Name,
+        params: Vec<Loc<(Name, Loc<TypeSig>)>>,
+        return_type: Loc<TypeSig>,
+        body: Box<Loc<Expr>>,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

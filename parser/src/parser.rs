@@ -494,7 +494,12 @@ impl<'input> Parser<'input> {
         };
         Ok(Loc {
             location: LocationRange(left.0, body.location.1),
-            inner: Stmt::Function(id, params, return_type, Box::new(body)),
+            inner: Stmt::Function {
+                name: id,
+                params,
+                return_type,
+                body: Box::new(body),
+            },
         })
     }
 

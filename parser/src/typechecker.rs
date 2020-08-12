@@ -229,11 +229,17 @@ impl TypeChecker {
     // Reads functions defined in this block
     fn read_functions(&mut self, stmts: &Vec<Loc<Stmt>>) -> Result<(), TypeError> {
         for stmt in stmts {
-            if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
+            if let Stmt::Function {
+                name,
+                params,
+                return_type,
+                body: _,
+            } = &stmt.inner
+            {
                 let params_type = self.func_params(params)?;
-                let return_type = self.lookup_type_sig(return_type_sig)?;
+                let return_type = self.lookup_type_sig(return_type)?;
                 self.function_table.insert(
-                    *func_name,
+                    *name,
                     FunctionInfo {
                         params_type: params_type.iter().map(|e| e.inner.1).collect(),
                         return_type,
@@ -269,7 +275,12 @@ impl TypeChecker {
                     inner: StmtT::Expr(typed_expr),
                 })
             }
-            Stmt::Function(name, params, return_type, body) => {
+            Stmt::Function {
+                name,
+                params,
+                return_type,
+                body,
+            } => {
                 let params = self.func_params(&params)?;
                 let return_type = self.lookup_type_sig(&return_type)?;
                 self.function(name, params, *body, return_type, location)
