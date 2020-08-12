@@ -1,7 +1,7 @@
 use crate::opcodes::*;
 use crate::util::*;
 use codegenerator::opcodes::*;
-use core::mem;
+use core::{mem, str};
 use std::io::Write;
 
 macro_rules! error {
@@ -16,6 +16,18 @@ macro_rules! err {
     };
 }
 
+macro_rules! map(
+    { $($key:expr => $value:expr),* } => {
+        {
+            let mut m = ::std::collections::HashMap::new();
+            $(
+                m.insert($key, $value);
+            )*
+            m
+        }
+     };
+);
+
 #[derive(Debug, Clone, Copy)]
 pub struct Var {
     pub idx: u32,
@@ -25,11 +37,11 @@ pub struct Var {
 #[derive(Debug, Clone, Copy)]
 pub struct VarPointer {
     idx: u32,
-    offset: u32,
+    offset: i32,
 }
 
 impl VarPointer {
-    pub fn new_stack(idx: u32, offset: u32) -> VarPointer {
+    pub fn new_stack(idx: u32, offset: i32) -> VarPointer {
         if idx & !(1u32 << 31) != idx {
             panic!("idx is too large");
         }
@@ -38,7 +50,7 @@ impl VarPointer {
         Self { idx, offset }
     }
 
-    pub fn new_heap(idx: u32, offset: u32) -> VarPointer {
+    pub fn new_heap(idx: u32, offset: i32) -> VarPointer {
         if idx & !(1u32 << 31) != idx {
             panic!("idx is too large");
         }
@@ -59,7 +71,7 @@ impl From<u64> for VarPointer {
     fn from(val: u64) -> Self {
         Self {
             idx: (val >> 32) as u32,
-            offset: val as u32,
+            offset: val as u32 as i32,
         }
     }
 }
@@ -83,76 +95,103 @@ impl VarBuffer {
         }
     }
 
-    pub fn get_var_record(&self, var_idx: u32) -> Result<Var, Error> {
-        if var_idx == 0 {
+    pub fn get_var_range_mut(&mut self, ptr: VarPointer, len: u32) -> Result<&mut [u8], Error> {
+        if ptr.var_idx() == 0 {
             return err!("NullPointer", "a variable of offset 0 was used");
         }
 
-        match self.vars.get(var_idx as usize - 1) {
-            Some(x) => Ok(*x),
-            None => err!(
-                "IncorrectVarOffset",
-                "a variable offset of {} is incorrect",
-                var_idx as usize
-            ),
-        }
-    }
+        let var = match self.vars.get(ptr.var_idx() as usize - 1) {
+            Some(x) => *x,
+            None => {
+                return err!(
+                    "IncorrectVarOffset",
+                    "a variable offset of {} is incorrect",
+                    ptr.idx
+                )
+            }
+        };
 
-    pub fn get_var_range_mut(
-        &mut self,
-        var: &Var,
-        offset: i32,
-        len: u32,
-    ) -> Result<&mut [u8], Error> {
-        if (len as i32) < 0i32 {
-            panic!("struct too long");
-        }
-
-        let upper = offset + len as i32;
-        if upper > var.len as i32 || offset < 0i32 {
+        let upper = ptr.offset + len as i32;
+        if upper > var.len as i32 || ptr.offset < 0i32 {
             return err!(
                 "OutOfValueBounds",
                 "tried to access bytes {}..{} in an object of length {}",
-                offset,
+                ptr.offset,
                 upper,
                 var.len
             );
         }
 
-        let begin = (var.idx + offset as u32) as usize;
-
-        return Ok(&mut self.data[begin..(begin + upper as usize)]);
+        let begin = var.idx + ptr.offset as u32;
+        return Ok(&mut self.data[begin as usize..((begin + len) as usize)]);
     }
 
-    pub fn get_var_range(&self, var: &Var, offset: i32, len: u32) -> Result<&[u8], Error> {
-        if (len as i32) < 0i32 {
-            panic!("struct too long");
+    pub fn get_var_range(&self, ptr: VarPointer, len: u32) -> Result<&[u8], Error> {
+        if ptr.var_idx() == 0 {
+            return err!("NullPointer", "a variable of offset 0 was used");
         }
 
-        let upper = offset + len as i32;
-        if upper > var.len as i32 || offset < 0i32 {
+        let var = match self.vars.get(ptr.var_idx() as usize - 1) {
+            Some(x) => *x,
+            None => {
+                return err!(
+                    "IncorrectVarOffset",
+                    "a variable offset of {} is incorrect",
+                    ptr.idx
+                )
+            }
+        };
+
+        let upper = ptr.offset + len as i32;
+        if upper > var.len as i32 || ptr.offset < 0i32 {
             return err!(
                 "OutOfValueBounds",
                 "tried to access bytes {}..{} in an object of length {}",
-                offset,
+                ptr.offset,
                 upper,
                 var.len
             );
         }
 
-        let begin = (var.idx + offset as u32) as usize;
-
+        let begin = (var.idx + ptr.offset as u32) as usize;
         return Ok(&self.data[begin..(begin + upper as usize)]);
     }
 
-    pub fn get_var<T: Copy + Default>(&self, var_idx: u32, offset: i32) -> Result<T, Error> {
-        let var = self.get_var_record(var_idx)?;
+    pub fn get_full_var_range(&self, ptr: VarPointer) -> Result<&[u8], Error> {
+        if ptr.var_idx() == 0 {
+            return err!("NullPointer", "a variable of offset 0 was used");
+        }
+
+        let var = match self.vars.get(ptr.var_idx() as usize - 1) {
+            Some(x) => *x,
+            None => {
+                return err!(
+                    "IncorrectVarOffset",
+                    "a variable offset of {} is incorrect",
+                    ptr.idx
+                )
+            }
+        };
+
+        if ptr.offset > var.len as i32 || ptr.offset < 0i32 {
+            return err!(
+                "OutOfValueBounds",
+                "tried to access byte {} in an object of length {}",
+                ptr.offset,
+                var.len
+            );
+        }
+
+        return Ok(&self.data[var.idx as usize..((var.idx + var.len) as usize)]);
+    }
+
+    pub fn get_var<T: Copy + Default>(&self, ptr: VarPointer) -> Result<T, Error> {
         let len = mem::size_of::<T>();
         if len > u32::MAX as usize {
             panic!("struct too long");
         }
 
-        let from_bytes = self.get_var_range(&var, offset, len as u32)?;
+        let from_bytes = self.get_var_range(ptr, len as u32)?;
 
         let mut t = T::default();
         let to_bytes = unsafe { any_as_u8_slice_mut(&mut t) };
@@ -204,11 +243,12 @@ impl VarBuffer {
     }
 
     pub fn shrink_vars_to(&mut self, len: u32) {
-        if (len as usize) > self.vars.len() {
+        let len = (len - 1) as usize;
+        if len > self.vars.len() {
             panic!("shrinking to a length larger than the vars array");
         }
 
-        self.vars.resize(len as usize, Var { idx: 0, len: 0 });
+        self.vars.resize(len, Var { idx: 0, len: 0 });
         if let Some(var) = self.vars.last() {
             self.data.resize((var.idx + var.len) as usize, 0);
         } else {
@@ -246,14 +286,13 @@ impl VarBuffer {
         return Ok(out);
     }
 
-    pub fn set<T: Copy + Default>(&mut self, var_idx: u32, offset: i32, t: T) -> Result<(), Error> {
-        let var = self.get_var_record(var_idx)?;
+    pub fn set<T: Copy + Default>(&mut self, ptr: VarPointer, t: T) -> Result<(), Error> {
         let len = mem::size_of::<T>();
         if len > u32::MAX as usize {
             panic!("struct too long");
         }
 
-        let to_bytes = self.get_var_range_mut(&var, offset, len as u32)?;
+        let to_bytes = self.get_var_range_mut(ptr, len as u32)?;
         to_bytes.copy_from_slice(any_as_u8_slice(&t));
 
         return Ok(());
@@ -320,7 +359,14 @@ where
 
             if should_return {
                 self.stack.shrink_vars_to(fp);
-                self.callstack.resize(callstack_len, self.callstack[0]);
+                self.callstack.resize(
+                    callstack_len,
+                    CallFrame {
+                        file: 0,
+                        name: 0,
+                        line: 0,
+                    },
+                );
                 return Ok(());
             }
 
@@ -357,13 +403,17 @@ where
             Opcode::LoadStr(idx) => {
                 let str_value = program.strings[idx as usize].as_bytes();
                 let str_len = str_value.len() as u32;
-                let idx = self.heap.add_var_dyn(str_len + 1);
-                let var = self.heap.get_var_record(idx)?;
-                let str_bytes = self.heap.get_var_range_mut(&var, 0, str_len)?;
-                str_bytes.copy_from_slice(str_value);
-                self.heap.get_var_range_mut(&var, str_len as i32, 1)?[0] = 0;
 
-                self.stack.push_word(VarPointer::new_heap(idx, 0).into());
+                let idx = self.heap.add_var_dyn(str_len + 1);
+                let ptr = VarPointer::new_heap(idx, 0);
+                self.heap
+                    .get_var_range_mut(ptr, str_len)?
+                    .copy_from_slice(str_value);
+
+                let end_ptr = VarPointer::new_heap(idx, str_len as i32);
+                self.heap.get_var_range_mut(end_ptr, 1)?[0] = 0;
+
+                self.stack.push_word(ptr.into());
             }
 
             Opcode::GetLocalWord { var, offset, .. } => {
@@ -374,8 +424,10 @@ where
                     fp + var as u32
                 };
 
-                self.stack
-                    .push_word(self.stack.get_var(global_idx, offset as i32)?);
+                self.stack.push_word(
+                    self.stack
+                        .get_var(VarPointer::new_stack(global_idx, offset as i32))?,
+                );
             }
             Opcode::SetLocalWord { var, offset, .. } => {
                 let global_idx = if var < 0 {
@@ -385,42 +437,32 @@ where
                     fp + var as u32
                 };
 
+                let ptr = VarPointer::new_stack(global_idx, offset as i32);
                 let word = self.stack.pop_word()?;
-                self.stack.set(global_idx, offset as i32, word)?;
+                self.stack
+                    .set(self.stack.get_var::<u64>(ptr)?.into(), word)?;
             }
 
             Opcode::GetWord { offset, .. } => {
-                let ptr: VarPointer = self.stack.pop_word()?.into();
-                let offset = if offset < 0 {
-                    let offset = (offset * -1) as u32;
-                    ptr.offset - offset
-                } else {
-                    ptr.offset + offset as u32
-                } as i32;
-
+                let mut ptr: VarPointer = self.stack.pop_word()?.into();
+                ptr.offset += offset;
                 let word = if ptr.is_stack() {
-                    self.stack.get_var(ptr.var_idx(), offset)?
+                    self.stack.get_var(ptr)?
                 } else {
-                    self.heap.get_var(ptr.var_idx(), offset)?
+                    self.heap.get_var(ptr)?
                 };
 
                 self.stack.push_word(word);
             }
             Opcode::SetWord { offset, .. } => {
-                let ptr: VarPointer = self.stack.pop_word()?.into();
-                let offset = if offset < 0 {
-                    let offset = (offset * -1) as u32;
-                    ptr.offset - offset
-                } else {
-                    ptr.offset + offset as u32
-                } as i32;
-
+                let mut ptr: VarPointer = self.stack.pop_word()?.into();
+                ptr.offset += offset;
                 let word = self.stack.pop_word()?;
 
                 if ptr.is_stack() {
-                    self.stack.set(ptr.var_idx(), offset, word)?
+                    self.stack.set(ptr, word)?
                 } else {
-                    self.heap.set(ptr.var_idx(), offset, word)?
+                    self.heap.set(ptr, word)?
                 }
             }
 
@@ -443,9 +485,40 @@ where
                 self.callstack.pop();
             }
 
-            Opcode::Ecall { call: 0, .. } => {
+            Opcode::Ecall {
+                call: ECALL_PRINT_INT,
+                ..
+            } => {
                 let word = self.stack.pop_word()?;
                 write!(self.stdout, "{}", word as i64)
+                    .map_err(|err| error!("WriteFailed", "failed to write to stdout ({})", err))?;
+            }
+            Opcode::Ecall {
+                call: ECALL_PRINT_STR,
+                ..
+            } => {
+                let ptr: VarPointer = self.stack.pop_word()?.into();
+                let str_bytes = if ptr.is_stack() {
+                    self.stack.get_full_var_range(ptr)?
+                } else {
+                    self.heap.get_full_var_range(ptr)?
+                };
+
+                let mut idx = str_bytes.len();
+                for (idx_, byte) in str_bytes.iter().enumerate() {
+                    if *byte == 0 {
+                        idx = idx_;
+                        break;
+                    }
+                }
+
+                if idx == str_bytes.len() {
+                    return err!("MissingNullTerminator", "string missing null terminator");
+                }
+
+                let str_value = unsafe { str::from_utf8_unchecked(&str_bytes[0..idx]) };
+
+                write!(self.stdout, "{}", str_value)
                     .map_err(|err| error!("WriteFailed", "failed to write to stdout ({})", err))?;
             }
             Opcode::Ecall { call, .. } => {
@@ -455,4 +528,28 @@ where
 
         return Ok(false);
     }
+}
+
+#[test]
+fn simple_read_write() {
+    let files = map! {
+        "main.c".to_string() => map! {
+            "main".to_string() => vec![
+                PseudoOp::Call { file: "main.c".to_string(), func: "helper".to_string(), line: 1},
+                PseudoOp::Ret,
+            ],
+            "helper".to_string() => vec![
+                PseudoOp::LoadString("hello".to_string()),
+                PseudoOp::Ecall { call: ECALL_PRINT_STR, line: 0 },
+                PseudoOp::Ret,
+            ]
+        }
+    };
+
+    let program = Program::new(files);
+    let mut stdout = StringWriter::new();
+    let mut runtime = Runtime::new(&mut stdout);
+    runtime.run_program(program).expect("why did this fail?");
+
+    assert_eq!(stdout.to_string(), "hello");
 }
