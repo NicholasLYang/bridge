@@ -811,11 +811,19 @@ impl<'input> Parser<'input> {
                 })
             }
             Some((Token::LParen, left)) => {
-                let (_, right) = self.expect(TokenD::RParen, "type")?;
-                Ok(Loc {
-                    location: LocationRange(left.0, right.1),
-                    inner: TypeSig::Empty,
-                })
+                let (entries, right) =
+                    self.comma::<Loc<TypeSig>>(&Self::type_, "type", Token::RParen)?;
+                if entries.len() == 0 {
+                    Ok(Loc {
+                        location: LocationRange(left.0, right.1),
+                        inner: TypeSig::Empty,
+                    })
+                } else {
+                    Ok(Loc {
+                        location: LocationRange(left.0, right.1),
+                        inner: TypeSig::Tuple(entries),
+                    })
+                }
             }
             Some((token, location)) => Err(ParseError::UnexpectedToken {
                 token: token_to_string(&self.lexer.name_table, &token),

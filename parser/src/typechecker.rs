@@ -317,28 +317,29 @@ impl TypeChecker {
         }
     }
 
-    fn value(&self, value: Value) -> ExprT {
+    fn value(&self, value: Value) -> Option<ExprT> {
         match value {
-            Value::Integer(_i) => ExprT::Primary {
+            Value::Integer(_i) => Some(ExprT::Primary {
                 value,
                 type_: INT_INDEX,
-            },
-            Value::Float(_f) => ExprT::Primary {
+            }),
+            Value::Float(_f) => Some(ExprT::Primary {
                 value,
                 type_: FLOAT_INDEX,
-            },
-            Value::Bool(_b) => ExprT::Primary {
+            }),
+            Value::Bool(_b) => Some(ExprT::Primary {
                 value,
                 type_: BOOL_INDEX,
-            },
-            Value::String(s) => ExprT::Primary {
+            }),
+            Value::String(s) => Some(ExprT::Primary {
                 value: Value::String(s),
                 type_: STR_INDEX,
-            },
-            Value::Empty => ExprT::Primary {
+            }),
+            Value::Empty => Some(ExprT::Primary {
                 value: Value::Empty,
                 type_: UNIT_INDEX,
-            },
+            }),
+            _ => None,
         }
     }
 
@@ -347,6 +348,13 @@ impl TypeChecker {
             TypeSig::Array(sig) => {
                 let type_ = self.lookup_type_sig(sig)?;
                 Ok(self.type_table.insert(Type::Array(type_)))
+            }
+            TypeSig::Tuple(entries) => {
+                let mut entry_types = Vec::new();
+                for entry in entries {
+                    entry_types.push(self.lookup_type_sig(entry)?);
+                }
+                Ok(self.type_table.insert(Type::Tuple(entry_types)))
             }
             TypeSig::Name(name) => self
                 .type_names
@@ -489,7 +497,7 @@ impl TypeChecker {
         match expr.inner {
             Expr::Primary { value } => Ok(Loc {
                 location,
-                inner: self.value(value),
+                inner: self.value(value).unwrap(),
             }),
             Expr::Var { name } => {
                 let entry =
@@ -702,7 +710,7 @@ impl TypeChecker {
                 for (name, expr) in fields {
                     let expr_t = self.expr(expr)?;
                     field_types.push((name, expr_t.inner.get_type()));
-                    fields_t.push((name, expr_t));
+                    fields_t.push(expr_t);
                 }
                 let expr_type = self.type_table.insert(Type::Record(field_types));
                 let type_ = self.unify(type_id, expr_type).ok_or_else(|| {
@@ -714,11 +722,7 @@ impl TypeChecker {
                 })?;
                 Ok(Loc {
                     location,
-                    inner: ExprT::Record {
-                        name,
-                        fields: fields_t,
-                        type_,
-                    },
+                    inner: ExprT::Tuple(fields_t, type_),
                 })
             }
             Expr::Field(lhs, name) => {
@@ -861,8 +865,8 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
-            (Type::Any, t) => Some(type_id2),
-            (t, Type::Any) => Some(type_id1),
+            (Type::Any, _) => Some(type_id2),
+            (_, Type::Any) => Some(type_id1),
             _ => None,
         }
     }

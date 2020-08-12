@@ -1,6 +1,7 @@
 use crate::lexer::LocationRange;
 use crate::parser::ParseError;
 use crate::typechecker::TypeError;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -117,11 +118,6 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
-    Record {
-        name: Name,
-        fields: Vec<(Name, Loc<ExprT>)>,
-        type_: TypeId,
-    },
     Field(Box<Loc<ExprT>>, Name, TypeId),
     Call {
         callee: Name,
@@ -137,6 +133,7 @@ pub enum Value {
     Integer(i32),
     Bool(bool),
     String(String),
+    Tuple(Vec<Value>),
     Empty,
 }
 
@@ -159,6 +156,10 @@ impl fmt::Display for Value {
                 Value::Bool(b) => format!("bool: {}", b),
                 // TODO: Have this truncate the string
                 Value::String(s) => format!("string: {}", s),
+                Value::Tuple(ts) => format!(
+                    "tuple: ({})",
+                    ts.iter().map(|t| format!("{}", t)).join(", ")
+                ),
                 Value::Empty => format!("empty: ()"),
             }
         )
@@ -272,6 +273,7 @@ impl fmt::Display for Type {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TypeSig {
     Array(Box<Loc<TypeSig>>),
+    Tuple(Vec<Loc<TypeSig>>),
     Name(Name),
     Empty,
 }
@@ -309,11 +311,6 @@ impl ExprT {
                 stmts: _,
                 end_expr: _,
                 scope_index: _,
-                type_,
-            } => *type_,
-            ExprT::Record {
-                name: _,
-                fields: _,
                 type_,
             } => *type_,
             ExprT::If(_, _, _, type_) => *type_,

@@ -1,4 +1,4 @@
-use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, Value};
+use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, UnaryOp, Value};
 use crate::lexer::LocationRange;
 use crate::utils::PRINT_INDEX;
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ pub enum WalkerError {
         location: LocationRange,
         reason: &'static str,
     },
+    #[fail(display = "Not reachable. Internal error")]
+    NotReachable { location: LocationRange },
 }
 
 impl TreeWalker {
@@ -124,9 +126,8 @@ impl TreeWalker {
                     }
                     (Op::BangEqual, Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l != r)),
                     (Op::EqualEqual, Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l == r)),
-                    _ => Err(WalkerError::NotImplemented {
+                    _ => Err(WalkerError::NotReachable {
                         location: expr.location,
-                        reason: "binary operations",
                     }),
                 }
             }
@@ -165,7 +166,7 @@ impl TreeWalker {
             ExprT::Call {
                 callee,
                 args,
-                type_,
+                type_: _,
             } => {
                 if *callee == PRINT_INDEX {
                     for arg in args {
@@ -196,10 +197,28 @@ impl TreeWalker {
                     val
                 }
             }
-            ExprT::Var { name, type_ } => Ok(self
+            ExprT::Tuple(entries, _) => {
+                let mut values = Vec::new();
+                for entry in entries {
+                    values.push(self.interpret_expr(entry)?);
+                }
+                Ok(Value::Tuple(values))
+            }
+            ExprT::Var { name, type_: _ } => Ok(self
                 .lookup_in_scope(name)
                 .expect("Internal error: variable is not defined")
                 .clone()),
+            ExprT::UnaryOp { op, rhs, type_: _ } => {
+                let rhs_val = self.interpret_expr(rhs)?;
+                match (op, rhs_val) {
+                    (UnaryOp::Minus, Value::Integer(r)) => Ok(Value::Integer(-r)),
+                    (UnaryOp::Minus, Value::Float(r)) => Ok(Value::Float(-r)),
+                    (UnaryOp::Not, Value::Bool(r)) => Ok(Value::Bool(!r)),
+                    (_, _) => Err(WalkerError::NotReachable {
+                        location: expr.location,
+                    }),
+                }
+            }
             _ => Err(WalkerError::NotImplemented {
                 location: expr.location,
                 reason: "Expressions",
