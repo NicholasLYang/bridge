@@ -12,7 +12,8 @@ pub struct Scope {
 pub struct SymbolEntry {
     // Is the variable captured by a function?
     pub is_enclosed_var: bool,
-    pub entry_type: EntryType,
+    pub var_type: TypeId,
+    pub index: usize,
 }
 
 #[derive(Debug)]
@@ -25,20 +26,6 @@ pub struct SymbolTable {
     // the variable types
     var_types: Vec<TypeId>,
     current_scope: usize,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum EntryType {
-    Function {
-        // Index into function array
-        index: usize,
-        params_type: Vec<TypeId>,
-        return_type: TypeId,
-    },
-    Var {
-        var_type: TypeId,
-        index: usize,
-    },
 }
 
 pub static ALLOC_INDEX: u32 = 0;
@@ -136,28 +123,9 @@ impl SymbolTable {
             name,
             SymbolEntry {
                 is_enclosed_var: false,
-                entry_type: EntryType::Var {
-                    var_type,
-                    index: self.var_types.len() - 1,
-                },
+                var_type,
+                index: self.var_types.len() - 1,
             },
         );
-    }
-
-    pub fn insert_function(&mut self, name: Name, params_type: Vec<TypeId>, return_type: TypeId) {
-        if self.lookup_name(name).is_none() {
-            self.scopes[self.current_scope].symbols.insert(
-                name,
-                SymbolEntry {
-                    is_enclosed_var: false,
-                    entry_type: EntryType::Function {
-                        index: self.function_index,
-                        params_type,
-                        return_type,
-                    },
-                },
-            );
-            self.function_index += 1;
-        }
     }
 }

@@ -4,7 +4,7 @@ use crate::ast::{
 };
 use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
-use crate::symbol_table::{EntryType, SymbolTable};
+use crate::symbol_table::SymbolTable;
 use crate::utils::{
     NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
 };
@@ -68,6 +68,12 @@ pub struct Scope {
     pub parent: Option<usize>,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct FunctionInfo {
+    params_type: Vec<TypeId>,
+    return_type: TypeId,
+}
+
 pub struct TypeChecker {
     symbol_table: SymbolTable,
     // Type names. Right now just has the primitives like string,
@@ -81,6 +87,7 @@ pub struct TypeChecker {
     type_table: TypeTable,
     // Symbol table
     name_table: NameTable,
+    function_table: HashMap<Name, FunctionInfo>,
 }
 
 fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
@@ -119,6 +126,7 @@ impl TypeChecker {
             type_var_index: 0,
             type_table,
             name_table,
+            function_table: HashMap::new(),
         }
     }
 
@@ -224,10 +232,12 @@ impl TypeChecker {
             if let Stmt::Function(func_name, params, return_type_sig, _) = &stmt.inner {
                 let params_type = self.func_params(params)?;
                 let return_type = self.lookup_type_sig(return_type_sig)?;
-                self.symbol_table.insert_function(
+                self.function_table.insert(
                     *func_name,
-                    params_type.iter().map(|e| e.inner.1).collect(),
-                    return_type,
+                    FunctionInfo {
+                        params_type: params_type.iter().map(|e| e.inner.1).collect(),
+                        return_type,
+                    },
                 );
             }
         }
@@ -264,7 +274,8 @@ impl TypeChecker {
                 let return_type = self.lookup_type_sig(&return_type)?;
                 self.function(name, params, *body, return_type, location)
             }
-            Stmt::Asgn(name, type_sig, rhs) => Ok(self.asgn(name, type_sig, rhs, location)?),
+            Stmt::Def(name, type_sig, rhs) => Ok(self.def(name, type_sig, rhs, location)?),
+            Stmt::Asgn(name, rhs) => Ok(self.asgn(name, rhs, location)?),
             Stmt::Return(expr) => {
                 let typed_expr = self.expr(expr)?;
                 match self.return_type {
@@ -356,7 +367,7 @@ impl TypeChecker {
         }
     }
 
-    fn asgn(
+    fn def(
         &mut self,
         name: Name,
         type_sig: Loc<TypeSig>,
@@ -369,7 +380,7 @@ impl TypeChecker {
             self.symbol_table.insert_var(name, type_);
             Ok(Loc {
                 location,
-                inner: StmtT::Asgn(name, typed_rhs),
+                inner: StmtT::Def(name, typed_rhs),
             })
         } else {
             let type1 = type_to_string(&self.name_table, &self.type_table, type_sig_type);
@@ -382,6 +393,35 @@ impl TypeChecker {
                 location,
                 type1,
                 type2,
+            })
+        }
+    }
+
+    fn asgn(
+        &mut self,
+        name: Name,
+        rhs: Loc<Expr>,
+        location: LocationRange,
+    ) -> Result<Loc<StmtT>, TypeError> {
+        let var_type = self
+            .symbol_table
+            .lookup_name(name)
+            .ok_or(TypeError::VarNotDefined {
+                location,
+                name: self.name_table.get_str(&name).to_string(),
+            })?
+            .var_type;
+        let rhs_t = self.expr(rhs)?;
+        if self.unify(var_type, rhs_t.inner.get_type()).is_some() {
+            Ok(Loc {
+                location,
+                inner: StmtT::Asgn(name, rhs_t),
+            })
+        } else {
+            Err(TypeError::UnificationFailure {
+                location,
+                type1: type_to_string(&self.name_table, &self.type_table, var_type),
+                type2: type_to_string(&self.name_table, &self.type_table, rhs_t.inner.get_type()),
             })
         }
     }
@@ -470,20 +510,13 @@ impl TypeChecker {
                             location,
                             name: self.name_table.get_str(&name).to_string(),
                         })?;
-                match &entry.entry_type {
-                    EntryType::Function {
-                        index: _,
-                        params_type: _,
-                        return_type: _,
-                    } => Err(TypeError::FuncValues { location }),
-                    EntryType::Var { var_type, index: _ } => Ok(Loc {
-                        location,
-                        inner: ExprT::Var {
-                            name,
-                            type_: var_type.clone(),
-                        },
-                    }),
-                }
+                Ok(Loc {
+                    location,
+                    inner: ExprT::Var {
+                        name,
+                        type_: entry.var_type,
+                    },
+                })
             }
             Expr::BinOp { op, lhs, rhs } => {
                 let typed_lhs = self.expr(*lhs)?;

@@ -30,7 +30,8 @@ pub struct ProgramT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Stmt {
-    Asgn(Name, Loc<TypeSig>, Loc<Expr>),
+    Def(Name, Loc<TypeSig>, Loc<Expr>),
+    Asgn(Name, Loc<Expr>),
     Expr(Loc<Expr>),
     Return(Loc<Expr>),
     Function(
@@ -43,6 +44,7 @@ pub enum Stmt {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum StmtT {
+    Def(Name, Loc<ExprT>),
     Asgn(Name, Loc<ExprT>),
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),

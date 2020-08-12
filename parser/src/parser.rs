@@ -104,7 +104,7 @@ impl<'input> Parser<'input> {
             }
         } else {
             Err(ParseError::EndOfFile {
-                expected_tokens: expected_tokens_to_string(&self.lexer.name_table, &vec![expected]),
+                expected_tokens: expected_tokens_to_string(&vec![expected]),
                 expected_rule: rule.to_string(),
                 location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
             })
@@ -239,10 +239,7 @@ impl<'input> Parser<'input> {
             None => Err(ParseError::EndOfFile {
                 location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_rule: "identifier".to_string(),
-                expected_tokens: expected_tokens_to_string(
-                    &self.lexer.name_table,
-                    &vec![TokenD::Ident],
-                ),
+                expected_tokens: expected_tokens_to_string(&vec![TokenD::Ident]),
             }),
         }
     }
@@ -280,6 +277,19 @@ impl<'input> Parser<'input> {
                     location: if_expr.location,
                     inner: Stmt::Expr(if_expr),
                 }))
+            }
+            Some((Token::Ident(id), loc)) => {
+                if self.match_one(TokenD::Equal)?.is_some() {
+                    let rhs = self.expr()?;
+                    self.expect(TokenD::Semicolon, "assignment statement")?;
+                    Some(Ok(Loc {
+                        location: LocationRange(loc.0, rhs.location.1),
+                        inner: Stmt::Asgn(id, rhs),
+                    }))
+                } else {
+                    self.pushback((Token::Ident(id), loc));
+                    Some(self.expression_stmt())
+                }
             }
             Some((token, loc)) => {
                 self.pushback((token, loc));
@@ -331,7 +341,7 @@ impl<'input> Parser<'input> {
         self.expect(TokenD::Semicolon, "let statement")?;
         Ok(Loc {
             location: LocationRange(left.0, rhs_expr.location.1),
-            inner: Stmt::Asgn(id, type_sig, rhs_expr),
+            inner: Stmt::Def(id, type_sig, rhs_expr),
         })
     }
 
@@ -403,16 +413,13 @@ impl<'input> Parser<'input> {
             {
                 self.pushback(span);
                 let stmt = self.stmt()?.ok_or(ParseError::EndOfFile {
-                    expected_tokens: expected_tokens_to_string(
-                        &self.lexer.name_table,
-                        &vec![
-                            TokenD::Fun,
-                            TokenD::Let,
-                            TokenD::While,
-                            TokenD::Return,
-                            TokenD::RBrace,
-                        ],
-                    ),
+                    expected_tokens: expected_tokens_to_string(&vec![
+                        TokenD::Fun,
+                        TokenD::Let,
+                        TokenD::While,
+                        TokenD::Return,
+                        TokenD::RBrace,
+                    ]),
                     expected_rule: "block".to_string(),
                     location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 })?;
@@ -473,18 +480,15 @@ impl<'input> Parser<'input> {
                 return Err(ParseError::EndOfFile {
                     location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                     expected_rule: "function body".to_string(),
-                    expected_tokens: expected_tokens_to_string(
-                        &self.lexer.name_table,
-                        &vec![
-                            TokenD::LBrace,
-                            TokenD::LParen,
-                            TokenD::True,
-                            TokenD::False,
-                            TokenD::Integer,
-                            TokenD::Float,
-                            TokenD::String,
-                        ],
-                    ),
+                    expected_tokens: expected_tokens_to_string(&vec![
+                        TokenD::LBrace,
+                        TokenD::LParen,
+                        TokenD::True,
+                        TokenD::False,
+                        TokenD::Integer,
+                        TokenD::Float,
+                        TokenD::String,
+                    ]),
                 });
             }
         };
@@ -624,10 +628,7 @@ impl<'input> Parser<'input> {
                                 self.lexer.get_location(),
                             ),
                             expected_rule: "field access".to_string(),
-                            expected_tokens: expected_tokens_to_string(
-                                &self.lexer.name_table,
-                                &vec![TokenD::Ident],
-                            ),
+                            expected_tokens: expected_tokens_to_string(&vec![TokenD::Ident]),
                         })
                     }
                 };
@@ -657,17 +658,14 @@ impl<'input> Parser<'input> {
             return Err(ParseError::EndOfFile {
                 location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_rule: "expression".to_string(),
-                expected_tokens: expected_tokens_to_string(
-                    &self.lexer.name_table,
-                    &vec![
-                        TokenD::True,
-                        TokenD::False,
-                        TokenD::Integer,
-                        TokenD::Float,
-                        TokenD::String,
-                        TokenD::LParen,
-                    ],
-                ),
+                expected_tokens: expected_tokens_to_string(&vec![
+                    TokenD::True,
+                    TokenD::False,
+                    TokenD::Integer,
+                    TokenD::Float,
+                    TokenD::String,
+                    TokenD::LParen,
+                ]),
             });
         };
         match token {
@@ -817,10 +815,7 @@ impl<'input> Parser<'input> {
             None => Err(ParseError::EndOfFile {
                 location: LocationRange(self.lexer.get_location(), self.lexer.get_location()),
                 expected_rule: "type".to_string(),
-                expected_tokens: expected_tokens_to_string(
-                    &self.lexer.name_table,
-                    &vec![TokenD::LBracket, TokenD::Ident],
-                ),
+                expected_tokens: expected_tokens_to_string(&vec![TokenD::LBracket, TokenD::Ident]),
             }),
         }
     }

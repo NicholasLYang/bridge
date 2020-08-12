@@ -95,6 +95,6 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
     }
 }
 
-pub fn expected_tokens_to_string(name_table: &NameTable, tokens: &Vec<TokenD>) -> String {
+pub fn expected_tokens_to_string(tokens: &Vec<TokenD>) -> String {
     tokens.iter().map(|token| format!("{}", token)).join(", ")
 }
