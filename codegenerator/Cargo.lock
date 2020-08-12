@@ -3,10 +3,3 @@
 [[package]]
 name = "codegenerator"
 version = "0.1.0"
-
-[[package]]
-name = "interpreter"
-version = "0.1.0"
-dependencies = [
- "codegenerator",
-]

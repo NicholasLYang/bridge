@@ -1,5 +1,6 @@
 use crate::opcodes::*;
 use crate::util::*;
+use codegenerator::opcodes::*;
 use core::mem;
 use std::io::Write;
 
@@ -265,7 +266,7 @@ where
 {
     pub stack: VarBuffer,
     pub heap: VarBuffer,
-    pub callstack: Vec<FuncDesc>,
+    pub callstack: Vec<CallFrame>,
     pub stdout: Out,
 }
 
@@ -283,11 +284,21 @@ where
     }
 
     pub fn run_program(&mut self, program: Program) -> Result<(), Error> {
-        return self.run_func(program, 0);
+        match self.run_func(&program, 0) {
+            Ok(()) => Ok(()),
+            Err(mut err) => {
+                err.stack_trace.reserve(self.callstack.len());
+                for callframe in self.callstack.iter() {
+                    err.stack_trace.push(*callframe);
+                }
+
+                return Err(err);
+            }
+        }
     }
 
-    pub fn run_func(&mut self, program: Program, program_counter: usize) -> Result<(), Error> {
-        let func_desc = match program.ops[program_counter] {
+    pub fn run_func(&mut self, program: &Program, pcounter: usize) -> Result<(), Error> {
+        let func_desc = match program.ops[pcounter] {
             Opcode::Func(desc) => desc,
             op => {
                 return err!(
@@ -299,25 +310,13 @@ where
         };
 
         let callstack_len = self.callstack.len();
-        self.callstack.push(func_desc);
 
         let fp = self.stack.upper_bound();
-        let mut pc = program_counter + 1;
+        let mut pc = pcounter + 1;
 
         loop {
-            println!("{:?}", program.ops[pc]);
-            let should_return = match self.run_op(fp, program.ops[pc]) {
-                Ok(x) => x,
-                Err(mut err) => {
-                    err.stack_trace.reserve(self.callstack.len());
-                    for frame in self.callstack.iter() {
-                        err.stack_trace.push(*frame);
-                    }
-                    return Err(err);
-                }
-            };
-            println!("{:?}", self.stack.data);
-            println!("{:?}", self.heap.data);
+            let op = program.ops[pc];
+            let should_return = self.run_op(fp, &program, func_desc, op)?;
 
             if should_return {
                 self.stack.shrink_vars_to(fp);
@@ -330,7 +329,13 @@ where
     }
 
     #[inline]
-    pub fn run_op(&mut self, fp: u32, opcode: Opcode) -> Result<bool, Error> {
+    pub fn run_op(
+        &mut self,
+        fp: u32,
+        program: &Program,
+        func_desc: FuncDesc,
+        opcode: Opcode,
+    ) -> Result<bool, Error> {
         match opcode {
             Opcode::Func(_) => {}
 
@@ -349,31 +354,42 @@ where
             Opcode::MakeTempIntWord(value) => {
                 self.stack.push_word(value as u64);
             }
+            Opcode::LoadStr(idx) => {
+                let str_value = program.strings[idx as usize].as_bytes();
+                let str_len = str_value.len() as u32;
+                let idx = self.heap.add_var_dyn(str_len + 1);
+                let var = self.heap.get_var_record(idx)?;
+                let str_bytes = self.heap.get_var_range_mut(&var, 0, str_len)?;
+                str_bytes.copy_from_slice(str_value);
+                self.heap.get_var_range_mut(&var, str_len as i32, 1)?[0] = 0;
 
-            Opcode::GetLocalWord { var_offset, offset } => {
-                let global_idx = if var_offset < 0 {
-                    let var_offset = (var_offset * -1) as u32;
-                    fp - var_offset
+                self.stack.push_word(VarPointer::new_heap(idx, 0).into());
+            }
+
+            Opcode::GetLocalWord { var, offset, .. } => {
+                let global_idx = if var < 0 {
+                    let var = (var * -1) as u32;
+                    fp - var
                 } else {
-                    fp + var_offset as u32
+                    fp + var as u32
                 };
 
                 self.stack
                     .push_word(self.stack.get_var(global_idx, offset as i32)?);
             }
-            Opcode::SetLocalWord { var_offset, offset } => {
-                let global_idx = if var_offset < 0 {
-                    let var_offset = (var_offset * -1) as u32;
-                    fp - var_offset
+            Opcode::SetLocalWord { var, offset, .. } => {
+                let global_idx = if var < 0 {
+                    let var = (var * -1) as u32;
+                    fp - var
                 } else {
-                    fp + var_offset as u32
+                    fp + var as u32
                 };
 
                 let word = self.stack.pop_word()?;
                 self.stack.set(global_idx, offset as i32, word)?;
             }
 
-            Opcode::GetWord { offset } => {
+            Opcode::GetWord { offset, .. } => {
                 let ptr: VarPointer = self.stack.pop_word()?.into();
                 let offset = if offset < 0 {
                     let offset = (offset * -1) as u32;
@@ -390,7 +406,7 @@ where
 
                 self.stack.push_word(word);
             }
-            Opcode::SetWord { offset } => {
+            Opcode::SetWord { offset, .. } => {
                 let ptr: VarPointer = self.stack.pop_word()?.into();
                 let offset = if offset < 0 {
                     let offset = (offset * -1) as u32;
@@ -417,61 +433,26 @@ where
                 self.callstack.pop();
             }
 
-            Opcode::Ecall(0) => {
+            Opcode::Call { func, line } => {
+                self.callstack.push(CallFrame {
+                    file: func_desc.file,
+                    name: func_desc.name,
+                    line,
+                });
+                self.run_func(program, func as usize)?;
+                self.callstack.pop();
+            }
+
+            Opcode::Ecall { call: 0, .. } => {
                 let word = self.stack.pop_word()?;
                 write!(self.stdout, "{}", word as i64)
                     .map_err(|err| error!("WriteFailed", "failed to write to stdout ({})", err))?;
             }
-            Opcode::Ecall(call) => {
+            Opcode::Ecall { call, .. } => {
                 return err!("InvalidEnviromentCall", "invalid ecall value of {}", call);
             }
         }
 
         return Ok(false);
     }
-}
-
-#[test]
-pub fn simple_read_write() {
-    let mut writer = StringWriter::new();
-    let mut runtime = Runtime::new(&mut writer);
-
-    let program = Program::new(
-        vec!["main.c"],
-        vec!["".to_string()],
-        vec!["main"],
-        vec![
-            Opcode::Func(FuncDesc {
-                file: 0,
-                line: 1,
-                name: 0,
-            }),
-            Opcode::StackAlloc(8),
-            Opcode::Alloc(8),
-            Opcode::SetLocalWord {
-                var_offset: 0,
-                offset: 0,
-            },
-            Opcode::MakeTempIntWord(12),
-            Opcode::GetLocalWord {
-                var_offset: 0,
-                offset: 0,
-            },
-            Opcode::SetWord { offset: 0 },
-            Opcode::GetLocalWord {
-                var_offset: 0,
-                offset: 0,
-            },
-            Opcode::GetWord { offset: 0 },
-            Opcode::Ecall(0),
-            Opcode::Ret,
-        ],
-    );
-
-    match runtime.run_program(program) {
-        Err(x) => panic!("got error: {:?}", x),
-        _ => {}
-    }
-
-    assert_eq!(writer.to_string(), "12");
 }
