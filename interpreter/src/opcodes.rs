@@ -57,11 +57,13 @@ impl<'a> Program<'a> {
         let mut file_ranges = Vec::new();
         let mut string_ranges = Vec::new();
         let mut function_ranges = Vec::new();
+
+        let mut function_ids = HashMap::new();
         let mut pseudo_functions = Vec::new();
 
-        for (file_number, (file, functions_)) in program.into_iter().enumerate() {
+        for (file_number, (file_name, functions_)) in program.into_iter().enumerate() {
             let start = bytes.len();
-            bytes.extend_from_slice(file.as_bytes());
+            bytes.extend_from_slice(file_name.as_bytes());
             file_ranges.push(start..bytes.len());
 
             for (name, ops) in functions_.into_iter() {
@@ -69,13 +71,17 @@ impl<'a> Program<'a> {
                 bytes.extend_from_slice(name.as_bytes());
                 function_ranges.push(start..bytes.len());
                 let file = file_number as u32;
+                function_ids.insert((file_name.clone(), name), pseudo_functions.len() as u32);
                 pseudo_functions.push((file, ops));
             }
         }
 
+        let mut function_locations = HashMap::new();
         let mut ops = Vec::new();
         for (name, (file, body)) in pseudo_functions.into_iter().enumerate() {
             let name = name as u32;
+            function_locations.insert(name, ops.len() as u32);
+
             ops.push(Opcode::Func(FuncDesc { file, name }));
 
             for op in body.into_iter() {
@@ -107,11 +113,23 @@ impl<'a> Program<'a> {
                     PseudoOp::AddCallstackDesc(desc) => Opcode::AddCallstackDesc(desc),
                     PseudoOp::RemoveCallstackDesc => Opcode::RemoveCallstackDesc,
 
-                    PseudoOp::Call { func, line } => Opcode::Call { func, line },
+                    PseudoOp::Call { file, func, line } => Opcode::Call {
+                        func: *function_ids.get(&(file, func)).unwrap(),
+                        line,
+                    },
                     PseudoOp::Ecall { call, line } => Opcode::Ecall { call, line },
                 };
 
                 ops.push(op);
+            }
+        }
+
+        for op in &mut ops {
+            match op {
+                Opcode::Call { func, .. } => {
+                    *func = *function_locations.get(func).unwrap();
+                }
+                _ => {}
             }
         }
 
