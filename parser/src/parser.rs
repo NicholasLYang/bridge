@@ -3,6 +3,7 @@ use crate::lexer::{Lexer, LexicalError, LocationRange, Token, TokenD};
 use crate::printer::{expected_tokens_to_string, token_to_string};
 use crate::utils::NameTable;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::fmt::Debug;
 
 pub struct Parser<'input> {
@@ -43,6 +44,8 @@ pub enum ParseError {
     TypeSigMandatory { location: LocationRange },
     #[fail(display = "Function calls can only be on names")]
     ComplexCallee { location: LocationRange },
+    #[fail(display = "Tuple index must be positive")]
+    InvalidTupleIndex { location: LocationRange },
 }
 
 impl ParseError {
@@ -63,6 +66,7 @@ impl ParseError {
             ParseError::InvalidOp { token: _, location } => *location,
             ParseError::TypeSigMandatory { location } => *location,
             ParseError::ComplexCallee { location } => *location,
+            ParseError::InvalidTupleIndex { location } => *location,
         }
     }
 }
@@ -626,6 +630,18 @@ impl<'input> Parser<'input> {
                             location: LocationRange(expr.location.0, right.1),
                             inner: Expr::Field(Box::new(expr), name),
                         };
+                    }
+                    Some((Token::Integer(i), right)) => {
+                        let index: usize = match i.try_into() {
+                            Ok(i) => i,
+                            Err(_) => {
+                                return Err(ParseError::InvalidTupleIndex { location: right })
+                            }
+                        };
+                        expr = Loc {
+                            location: LocationRange(expr.location.0, right.1),
+                            inner: Expr::TupleField(Box::new(expr), index),
+                        }
                     }
                     Some((token, location)) => {
                         return Err(ParseError::UnexpectedToken {

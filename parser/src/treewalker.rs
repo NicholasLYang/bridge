@@ -204,6 +204,16 @@ impl TreeWalker {
                 }
                 Ok(Value::Tuple(values))
             }
+            ExprT::TupleField(tuple, pos, _) => {
+                let val = self.interpret_expr(tuple)?;
+                if let Value::Tuple(entries) = val {
+                    Ok(entries[*pos].clone())
+                } else {
+                    Err(WalkerError::NotReachable {
+                        location: expr.location,
+                    })
+                }
+            }
             ExprT::Var { name, type_: _ } => Ok(self
                 .lookup_in_scope(name)
                 .expect("Internal error: variable is not defined")
@@ -219,10 +229,6 @@ impl TreeWalker {
                     }),
                 }
             }
-            _ => Err(WalkerError::NotImplemented {
-                location: expr.location,
-                reason: "Expressions",
-            }),
         }
     }
 }

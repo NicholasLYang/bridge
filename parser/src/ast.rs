@@ -78,6 +78,7 @@ pub enum Expr {
         args: Vec<Loc<Expr>>,
     },
     Field(Box<Loc<Expr>>, Name),
+    TupleField(Box<Loc<Expr>>, usize),
     Record {
         name: Name,
         fields: Vec<(Name, Loc<Expr>)>,
@@ -118,7 +119,7 @@ pub enum ExprT {
         rhs: Box<Loc<ExprT>>,
         type_: TypeId,
     },
-    Field(Box<Loc<ExprT>>, Name, TypeId),
+    TupleField(Box<Loc<ExprT>>, usize, TypeId),
     Call {
         callee: Name,
         args: Vec<Loc<ExprT>>,
@@ -301,7 +302,7 @@ impl ExprT {
                 rhs: _,
                 type_,
             } => *type_,
-            ExprT::Field(_, _, type_) => *type_,
+            ExprT::TupleField(_, _, type_) => *type_,
             ExprT::Call {
                 callee: _,
                 args: _,

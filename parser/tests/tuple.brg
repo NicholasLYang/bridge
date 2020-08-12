@@ -1,2 +1,3 @@
 let tuple: (int, int) = (10, 11);
 print(tuple);
+print(tuple.0);

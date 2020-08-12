@@ -1,0 +1,5 @@
+struct Person {
+  name: string
+}
+let p: Person = Person { name: "Nicholas" };
+print(p.name);

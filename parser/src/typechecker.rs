@@ -50,6 +50,11 @@ pub enum TypeError {
         location: LocationRange,
         type_: String,
     },
+    #[fail(display = "Type {} is not a tuple", type_)]
+    NotATuple {
+        location: LocationRange,
+        type_: String,
+    },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
@@ -67,8 +72,13 @@ pub enum TypeError {
         location
     )]
     ShadowingFunction { location: LocationRange },
-    #[fail(display = "{}: Functions are not values", location)]
+    #[fail(display = "Functions are not values")]
     FuncValues { location: LocationRange },
+    #[fail(display = "Tuple index is out of bounds for tuple {}", tuple)]
+    TupleOutOfBounds {
+        location: LocationRange,
+        tuple: String,
+    },
 }
 
 impl TypeError {
@@ -92,11 +102,13 @@ impl TypeError {
             } => *location,
             TypeError::FieldDoesNotExist { location, name: _ } => *location,
             TypeError::NotARecord { location, type_: _ } => *location,
+            TypeError::NotATuple { location, type_: _ } => *location,
             TypeError::FunctionNotDefined { location, name: _ } => *location,
             TypeError::InvalidUnaryExpr { location, expr: _ } => *location,
             TypeError::TopLevelReturn { location } => *location,
             TypeError::ShadowingFunction { location } => *location,
             TypeError::FuncValues { location } => *location,
+            TypeError::TupleOutOfBounds { location, tuple: _ } => *location,
         }
     }
 }
@@ -730,12 +742,14 @@ impl TypeChecker {
                 let type_id = lhs_t.inner.get_type();
                 match self.type_table.get_type(type_id) {
                     Type::Record(fields) => {
-                        let field = fields.iter().find(|(field_name, _)| *field_name == name);
+                        let field_pos = fields
+                            .iter()
+                            .position(|(field_name, _)| *field_name == name);
 
-                        if let Some(field) = field {
+                        if let Some(pos) = field_pos {
                             Ok(Loc {
                                 location,
-                                inner: ExprT::Field(Box::new(lhs_t), name, field.1),
+                                inner: ExprT::TupleField(Box::new(lhs_t), pos, fields[pos].1),
                             })
                         } else {
                             let name_str = self.name_table.get_str(&name);
@@ -746,6 +760,29 @@ impl TypeChecker {
                         }
                     }
                     _ => Err(TypeError::NotARecord {
+                        location,
+                        type_: type_to_string(&self.name_table, &self.type_table, type_id),
+                    }),
+                }
+            }
+            Expr::TupleField(lhs, index) => {
+                let lhs_t = self.expr(*lhs)?;
+                let type_id = lhs_t.inner.get_type();
+                match self.type_table.get_type(type_id) {
+                    Type::Tuple(entries) => {
+                        if index < entries.len() {
+                            Ok(Loc {
+                                location,
+                                inner: ExprT::TupleField(Box::new(lhs_t), index, entries[index]),
+                            })
+                        } else {
+                            Err(TypeError::TupleOutOfBounds {
+                                location,
+                                tuple: type_to_string(&self.name_table, &self.type_table, type_id),
+                            })
+                        }
+                    }
+                    _ => Err(TypeError::NotATuple {
                         location,
                         type_: type_to_string(&self.name_table, &self.type_table, type_id),
                     }),
@@ -831,10 +868,7 @@ impl TypeChecker {
                         return None;
                     }
                 }
-                let id = self.type_table.insert(Type::Record(unified_fields));
-                self.type_table.update(type_id1, Type::Solved(id));
-                self.type_table.update(type_id2, Type::Solved(id));
-                Some(id)
+                Some(type_id1)
             }
             (Type::Tuple(ts), Type::Unit) | (Type::Unit, Type::Tuple(ts)) => {
                 if ts.is_empty() {
