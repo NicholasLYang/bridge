@@ -73,7 +73,7 @@ pub enum Expr {
         rhs: Box<Loc<Expr>>,
     },
     Call {
-        callee: Box<Loc<Expr>>,
+        callee: Name,
         args: Vec<Loc<Expr>>,
     },
     Field(Box<Loc<Expr>>, Name),
@@ -124,7 +124,7 @@ pub enum ExprT {
     },
     Field(Box<Loc<ExprT>>, Name, TypeId),
     Call {
-        callee: Box<Loc<ExprT>>,
+        callee: Name,
         args: Vec<Loc<ExprT>>,
         type_: TypeId,
     },

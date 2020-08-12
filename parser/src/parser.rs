@@ -41,6 +41,8 @@ pub enum ParseError {
     },
     #[fail(display = "Type signature is mandatory")]
     TypeSigMandatory { location: LocationRange },
+    #[fail(display = "Function calls can only be on names")]
+    ComplexCallee { location: LocationRange },
 }
 
 impl ParseError {
@@ -60,6 +62,7 @@ impl ParseError {
             ParseError::LexicalError { err } => err.get_location(),
             ParseError::InvalidOp { token: _, location } => *location,
             ParseError::TypeSigMandatory { location } => *location,
+            ParseError::ComplexCallee { location } => *location,
         }
     }
 }
@@ -609,7 +612,13 @@ impl<'input> Parser<'input> {
         let mut expr = self.primary()?;
         loop {
             if self.match_one(TokenD::LParen)?.is_some() {
-                expr = self.finish_call(expr)?;
+                if let Expr::Var { name } = &expr.inner {
+                    expr = self.finish_call(*name, expr)?;
+                } else {
+                    return Err(ParseError::ComplexCallee {
+                        location: expr.location,
+                    });
+                }
             } else if self.match_one(TokenD::Dot)?.is_some() {
                 match self.bump()? {
                     Some((Token::Ident(name), right)) => {
@@ -644,15 +653,12 @@ impl<'input> Parser<'input> {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Loc<Expr>) -> Result<Loc<Expr>, ParseError> {
+    fn finish_call(&mut self, name: Name, callee: Loc<Expr>) -> Result<Loc<Expr>, ParseError> {
         let (args, args_loc) =
             self.comma::<Loc<Expr>>(&Self::expr, "function arguments", Token::RParen)?;
         Ok(Loc {
             location: LocationRange(callee.location.0, args_loc.1),
-            inner: Expr::Call {
-                callee: Box::new(callee),
-                args,
-            },
+            inner: Expr::Call { callee: name, args },
         })
     }
 

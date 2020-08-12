@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
-    #[fail(display = "{}: Variable not defined: '{}'", location, name)]
+    #[fail(display = "Variable not defined: '{}'", name)]
     VarNotDefined {
         location: LocationRange,
         name: String,
@@ -55,8 +55,11 @@ pub enum TypeError {
         location: LocationRange,
         expr: ExprT,
     },
-    #[fail(display = "Callee is not a function")]
-    CalleeNotFunction { location: LocationRange },
+    #[fail(display = "Function '{}' is not defined", name)]
+    FunctionNotDefined {
+        location: LocationRange,
+        name: String,
+    },
     #[fail(display = "{}: Cannot return at top level", location)]
     TopLevelReturn { location: LocationRange },
     #[fail(
@@ -89,8 +92,8 @@ impl TypeError {
             } => *location,
             TypeError::FieldDoesNotExist { location, name: _ } => *location,
             TypeError::NotARecord { location, type_: _ } => *location,
+            TypeError::FunctionNotDefined { location, name: _ } => *location,
             TypeError::InvalidUnaryExpr { location, expr: _ } => *location,
-            TypeError::CalleeNotFunction { location } => *location,
             TypeError::TopLevelReturn { location } => *location,
             TypeError::ShadowingFunction { location } => *location,
             TypeError::FuncValues { location } => *location,
@@ -590,25 +593,29 @@ impl TypeChecker {
                 }
             }
             Expr::Call { callee, args } => {
-                let typed_callee = self.expr(*callee)?;
-                let callee_type = typed_callee.inner.get_type();
-                let (params_type, return_type) = match self.type_table.get_type(callee_type) {
-                    Type::Arrow(params_type, return_type) => (params_type.clone(), *return_type),
-                    _ => return Err(TypeError::CalleeNotFunction { location }),
-                };
                 let mut typed_args = Vec::new();
+                let mut args_type = Vec::new();
                 for arg in args {
-                    typed_args.push(self.expr(arg)?);
+                    let arg_t = self.expr(arg)?;
+                    args_type.push(arg_t.inner.get_type());
+                    typed_args.push(arg_t);
                 }
-                let args_type = typed_args
-                    .iter()
-                    .map(|arg| arg.inner.get_type())
-                    .collect::<Vec<TypeId>>();
+                let (params_type, return_type) = {
+                    let entry =
+                        self.function_table
+                            .get(&callee)
+                            .ok_or(TypeError::FunctionNotDefined {
+                                location,
+                                name: self.name_table.get_str(&callee).to_string(),
+                            })?;
+                    (entry.params_type.clone(), entry.return_type)
+                };
+
                 if self.unify_type_vectors(&params_type, &args_type).is_some() {
                     Ok(Loc {
                         location,
                         inner: ExprT::Call {
-                            callee: Box::new(typed_callee),
+                            callee,
                             args: typed_args,
                             type_: return_type,
                         },
@@ -632,7 +639,6 @@ impl TypeChecker {
                 }
             }
             Expr::Block(stmts, end_expr) => {
-                self.read_functions(&stmts)?;
                 let mut typed_stmts = Vec::new();
                 let previous_scope = self.symbol_table.push_scope(false);
                 for stmt in stmts {
