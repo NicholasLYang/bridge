@@ -41,16 +41,22 @@ pub enum TypeError {
         type_name: String,
     },
     #[fail(display = "Field {} does not exist in record", name)]
-    FieldDoesNotExist { name: String },
+    FieldDoesNotExist {
+        location: LocationRange,
+        name: String,
+    },
     #[fail(display = "Type {} is not a record", type_)]
-    NotARecord { type_: String },
+    NotARecord {
+        location: LocationRange,
+        type_: String,
+    },
     #[fail(display = "{} Cannot apply unary operator to {:?}", location, expr)]
     InvalidUnaryExpr {
         location: LocationRange,
         expr: ExprT,
     },
     #[fail(display = "Callee is not a function")]
-    CalleeNotFunction,
+    CalleeNotFunction { location: LocationRange },
     #[fail(display = "{}: Cannot return at top level", location)]
     TopLevelReturn { location: LocationRange },
     #[fail(
@@ -60,6 +66,36 @@ pub enum TypeError {
     ShadowingFunction { location: LocationRange },
     #[fail(display = "{}: Functions are not values", location)]
     FuncValues { location: LocationRange },
+}
+
+impl TypeError {
+    pub fn get_location(&self) -> LocationRange {
+        match self {
+            TypeError::VarNotDefined { location, name: _ } => *location,
+            TypeError::OpFailure {
+                location,
+                op: _,
+                lhs_type: _,
+                rhs_type: _,
+            } => *location,
+            TypeError::UnificationFailure {
+                location,
+                type1: _,
+                type2: _,
+            } => *location,
+            TypeError::TypeDoesNotExist {
+                location,
+                type_name: _,
+            } => *location,
+            TypeError::FieldDoesNotExist { location, name: _ } => *location,
+            TypeError::NotARecord { location, type_: _ } => *location,
+            TypeError::InvalidUnaryExpr { location, expr: _ } => *location,
+            TypeError::CalleeNotFunction { location } => *location,
+            TypeError::TopLevelReturn { location } => *location,
+            TypeError::ShadowingFunction { location } => *location,
+            TypeError::FuncValues { location } => *location,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -358,8 +394,9 @@ impl TypeChecker {
         }
     }
 
-    fn get_field_type(
+    /*    fn get_field_type(
         &mut self,
+        location: LocationRange,
         record_type: TypeId,
         field_name: usize,
     ) -> Result<TypeId, TypeError> {
@@ -368,15 +405,17 @@ impl TypeChecker {
                 Ok(*type_)
             } else {
                 Err(TypeError::FieldDoesNotExist {
+                    location,
                     name: self.name_table.get_str(&field_name).to_string(),
                 })
             }
         } else {
             Err(TypeError::NotARecord {
+                location,
                 type_: type_to_string(&self.name_table, &self.type_table, record_type),
             })
         }
-    }
+    }*/
 
     fn def(
         &mut self,
@@ -385,6 +424,9 @@ impl TypeChecker {
         rhs: Loc<Expr>,
         location: LocationRange,
     ) -> Result<Loc<StmtT>, TypeError> {
+        if self.function_table.contains_key(&name) {
+            return Err(TypeError::ShadowingFunction { location });
+        }
         let typed_rhs = self.expr(rhs)?;
         let type_sig_type = self.lookup_type_sig(&type_sig)?;
         if let Some(type_) = self.unify(type_sig_type, typed_rhs.inner.get_type()) {
@@ -600,7 +642,7 @@ impl TypeChecker {
                 let callee_type = typed_callee.inner.get_type();
                 let (params_type, return_type) = match self.type_table.get_type(callee_type) {
                     Type::Arrow(params_type, return_type) => (params_type.clone(), *return_type),
-                    _ => return Err(TypeError::CalleeNotFunction),
+                    _ => return Err(TypeError::CalleeNotFunction { location }),
                 };
                 let mut typed_args = Vec::new();
                 for arg in args {
@@ -755,11 +797,13 @@ impl TypeChecker {
                         } else {
                             let name_str = self.name_table.get_str(&name);
                             Err(TypeError::FieldDoesNotExist {
+                                location,
                                 name: name_str.to_string(),
                             })
                         }
                     }
                     _ => Err(TypeError::NotARecord {
+                        location,
                         type_: type_to_string(&self.name_table, &self.type_table, type_id),
                     }),
                 }
