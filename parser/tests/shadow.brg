@@ -1,0 +1,10 @@
+fun foo(): () {
+  let a: int = 10;
+  {
+    let a: float = 5.2;
+    print(a);
+  };
+  print(a);
+}
+
+foo();

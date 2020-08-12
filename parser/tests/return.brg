@@ -1,0 +1,10 @@
+fun foo(n: int): int {
+  if n > 10 {
+    return 5;
+  };
+  print("hello");
+  100;
+}
+
+print(foo(11));
+print(foo(2));

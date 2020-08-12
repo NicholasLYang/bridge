@@ -25,6 +25,11 @@ pub enum WalkerError {
     },
     #[fail(display = "Not reachable. Internal error")]
     NotReachable { location: LocationRange },
+    #[fail(display = "Not actually an error. Returning!")]
+    Return {
+        location: LocationRange,
+        value: Value,
+    },
 }
 
 impl TreeWalker {
@@ -81,15 +86,15 @@ impl TreeWalker {
                 self.update_in_scope(name, rhs_val);
             }
             StmtT::Expr(expr) => {
-                let res = self.interpret_expr(expr)?;
-                println!("{:?}", res);
+                self.interpret_expr(expr)?;
             }
             StmtT::Function(_) => {}
-            _ => {
-                return Err(WalkerError::NotImplemented {
+            StmtT::Return(expr) => {
+                let value = self.interpret_expr(expr)?;
+                return Err(WalkerError::Return {
                     location: stmt.location,
-                    reason: "Statements",
-                })
+                    value,
+                });
             }
         }
         Ok(())
@@ -207,6 +212,9 @@ impl TreeWalker {
                             .insert(name, arg_val);
                     }
                     let val = self.interpret_expr(&func.body);
+                    if let Err(WalkerError::Return { location: _, value }) = val {
+                        return Ok(value);
+                    }
                     self.current_scope = old_scope;
                     val
                 }

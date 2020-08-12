@@ -49,9 +49,7 @@ pub enum StmtT {
     Asgn(Name, Loc<ExprT>),
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
-    Block(Vec<Loc<StmtT>>),
     Function(Name),
-    Export(Name),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
