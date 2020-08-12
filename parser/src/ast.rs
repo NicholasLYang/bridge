@@ -49,7 +49,7 @@ pub enum StmtT {
     Expr(Loc<ExprT>),
     Return(Loc<ExprT>),
     Block(Vec<Loc<StmtT>>),
-    Function { name: Name, function: Function },
+    Function(Name),
     Export(Name),
 }
 
@@ -137,6 +137,7 @@ pub enum Value {
     Integer(i32),
     Bool(bool),
     String(String),
+    Empty,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -158,6 +159,7 @@ impl fmt::Display for Value {
                 Value::Bool(b) => format!("bool: {}", b),
                 // TODO: Have this truncate the string
                 Value::String(s) => format!("string: {}", s),
+                Value::Empty => format!("empty: ()"),
             }
         )
     }
@@ -216,6 +218,8 @@ pub enum Type {
     Record(Vec<(Name, TypeId)>),
     Tuple(Vec<TypeId>),
     Arrow(Vec<TypeId>, TypeId),
+    // This is a hack to get print to work with any value. DO NOT USE
+    Any,
     // Points to a type that is solved further
     // Not the greatest solution but meh
     Solved(TypeId),
@@ -258,6 +262,7 @@ impl fmt::Display for Type {
                         .join(",");
                     format!("({}) => {}", elems, return_type)
                 }
+                Type::Any => "any".into(),
                 Type::Solved(t) => format!("solved({})", t),
             }
         )

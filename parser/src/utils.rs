@@ -4,9 +4,13 @@ use bimap::BiMap;
 #[derive(Debug)]
 pub struct NameTable(BiMap<String, usize>, usize);
 
+pub static PRINT_INDEX: usize = 0;
+
 impl NameTable {
     pub fn new() -> Self {
-        NameTable(BiMap::new(), 0)
+        let mut map = BiMap::new();
+        map.insert("print".to_string(), 0);
+        NameTable(map, 1)
     }
     pub fn insert(&mut self, sym: String) -> usize {
         if let Some(id) = self.0.get_by_left(&sym) {
@@ -42,6 +46,7 @@ pub static CHAR_INDEX: usize = 2;
 pub static STR_INDEX: usize = 3;
 pub static BOOL_INDEX: usize = 4;
 pub static UNIT_INDEX: usize = 5;
+pub static ANY_INDEX: usize = 6;
 
 impl TypeTable {
     pub fn new() -> TypeTable {
@@ -53,6 +58,7 @@ impl TypeTable {
                 Type::String,
                 Type::Bool,
                 Type::Unit,
+                Type::Any,
             ],
         }
     }

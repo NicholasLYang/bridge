@@ -14,14 +14,16 @@ extern crate strum_macros;
 extern crate serde;
 extern crate serde_json;
 
-use crate::ast::{Program, ProgramT};
+use crate::ast::{Function, Name, Program, ProgramT};
 use crate::parser::{ParseError, Parser};
+use crate::treewalker::TreeWalker;
 use crate::typechecker::{TypeChecker, TypeError};
 use crate::utils::NameTable;
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
@@ -31,6 +33,7 @@ mod lexer;
 mod parser;
 mod printer;
 mod symbol_table;
+mod treewalker;
 mod typechecker;
 mod utils;
 
@@ -49,10 +52,17 @@ fn main() -> Result<(), io::Error> {
             for error in &program.errors {
                 diagnostics.push(error.into());
             }
-            let program_t = typecheck_file(program, name_table);
+            let (program_t, functions) = typecheck_file(program, name_table);
             for error in &program_t.errors {
                 diagnostics.push(error.into());
             }
+            let mut treewalker = TreeWalker::new(functions);
+            match treewalker.interpret_program(program_t) {
+                Err(e) => {
+                    println!("{:?}", e);
+                }
+                _ => {}
+            };
         }
         for diagnostic in diagnostics {
             term::emit(&mut writer.lock(), &config, &file, &diagnostic)?;
@@ -87,9 +97,12 @@ impl Into<Diagnostic<()>> for &ParseError {
     }
 }
 
-fn typecheck_file(program: Program, name_table: NameTable) -> ProgramT {
+fn typecheck_file(program: Program, name_table: NameTable) -> (ProgramT, HashMap<Name, Function>) {
     let mut typechecker = TypeChecker::new(name_table);
-    typechecker.check_program(program)
+    (
+        typechecker.check_program(program),
+        typechecker.get_functions(),
+    )
 }
 
 fn parse_file(contents: &String) -> Option<(Program, NameTable)> {

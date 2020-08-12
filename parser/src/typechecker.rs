@@ -6,11 +6,11 @@ use crate::lexer::LocationRange;
 use crate::printer::type_to_string;
 use crate::symbol_table::SymbolTable;
 use crate::utils::{
-    NameTable, TypeTable, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, STR_INDEX, UNIT_INDEX,
+    NameTable, TypeTable, ANY_INDEX, BOOL_INDEX, CHAR_INDEX, FLOAT_INDEX, INT_INDEX, PRINT_INDEX,
+    STR_INDEX, UNIT_INDEX,
 };
-use im::hashmap::HashMap;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
 
 #[derive(Debug, Fail, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeError {
@@ -29,7 +29,7 @@ pub enum TypeError {
         lhs_type: Type,
         rhs_type: Type,
     },
-    #[fail(display = "{}: Could not unify {} with {}", location, type1, type2)]
+    #[fail(display = "Could not unify {} with {}", type1, type2)]
     UnificationFailure {
         location: LocationRange,
         type1: String,
@@ -102,12 +102,6 @@ impl TypeError {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Scope {
-    pub names: HashMap<Name, Arc<Type>>,
-    pub parent: Option<usize>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionInfo {
     params_type: Vec<TypeId>,
     return_type: TypeId,
@@ -124,7 +118,8 @@ pub struct TypeChecker {
     type_table: TypeTable,
     // Symbol table
     name_table: NameTable,
-    function_table: HashMap<Name, FunctionInfo>,
+    function_types: HashMap<Name, FunctionInfo>,
+    functions: HashMap<Name, Function>,
 }
 
 fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
@@ -147,14 +142,22 @@ impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let symbol_table = SymbolTable::new();
         let type_table = TypeTable::new();
-
+        let mut function_types = HashMap::new();
+        function_types.insert(
+            PRINT_INDEX,
+            FunctionInfo {
+                params_type: vec![ANY_INDEX],
+                return_type: UNIT_INDEX,
+            },
+        );
         TypeChecker {
             symbol_table,
             type_names: build_type_names(&mut name_table),
             return_type: None,
             type_table,
             name_table,
-            function_table: HashMap::new(),
+            function_types,
+            functions: HashMap::new(),
         }
     }
 
@@ -165,6 +168,10 @@ impl TypeChecker {
     #[allow(dead_code)]
     pub fn get_name_table(&self) -> &NameTable {
         &self.name_table
+    }
+
+    pub fn get_functions(self) -> HashMap<Name, Function> {
+        self.functions
     }
 
     pub fn check_program(&mut self, program: Program) -> ProgramT {
@@ -229,7 +236,7 @@ impl TypeChecker {
             {
                 let params_type = self.func_params(params)?;
                 let return_type = self.lookup_type_sig(return_type)?;
-                self.function_table.insert(
+                self.function_types.insert(
                     *name,
                     FunctionInfo {
                         params_type: params_type.iter().map(|e| e.inner.1).collect(),
@@ -328,6 +335,10 @@ impl TypeChecker {
                 value: Value::String(s),
                 type_: STR_INDEX,
             },
+            Value::Empty => ExprT::Primary {
+                value: Value::Empty,
+                type_: UNIT_INDEX,
+            },
         }
     }
 
@@ -349,29 +360,6 @@ impl TypeChecker {
         }
     }
 
-    /*    fn get_field_type(
-        &mut self,
-        location: LocationRange,
-        record_type: TypeId,
-        field_name: usize,
-    ) -> Result<TypeId, TypeError> {
-        if let Type::Record(fields) = self.type_table.get_type(record_type) {
-            if let Some((_, type_)) = fields.iter().find(|(name, _)| *name == field_name) {
-                Ok(*type_)
-            } else {
-                Err(TypeError::FieldDoesNotExist {
-                    location,
-                    name: self.name_table.get_str(&field_name).to_string(),
-                })
-            }
-        } else {
-            Err(TypeError::NotARecord {
-                location,
-                type_: type_to_string(&self.name_table, &self.type_table, record_type),
-            })
-        }
-    }*/
-
     fn def(
         &mut self,
         name: Name,
@@ -379,7 +367,7 @@ impl TypeChecker {
         rhs: Loc<Expr>,
         location: LocationRange,
     ) -> Result<Loc<StmtT>, TypeError> {
-        if self.function_table.contains_key(&name) {
+        if self.function_types.contains_key(&name) {
             return Err(TypeError::ShadowingFunction { location });
         }
         let typed_rhs = self.expr(rhs)?;
@@ -434,14 +422,6 @@ impl TypeChecker {
         }
     }
 
-    /**
-     *
-     * BEFORE calling this function, please set up a new scope. Why before?
-     * Because if we're calling this with a function binding, i.e. StmtT::Function,
-     * then we need to insert the name into the scope, but if we're calling this with
-     * an anonymous function, i.e. ExprT::Function, then we can't do that
-     *
-     **/
     fn function(
         &mut self,
         name: Name,
@@ -489,17 +469,18 @@ impl TypeChecker {
 
         let local_variables = self.symbol_table.restore_vars(old_var_types);
         let scope_index = self.symbol_table.restore_scope(previous_scope);
+        self.functions.insert(
+            name,
+            Function {
+                params,
+                body: Box::new(body),
+                local_variables,
+                scope_index,
+            },
+        );
         Ok(Loc {
             location,
-            inner: StmtT::Function {
-                name,
-                function: Function {
-                    params,
-                    body: Box::new(body),
-                    local_variables,
-                    scope_index,
-                },
-            },
+            inner: StmtT::Function(name),
         })
     }
 
@@ -602,7 +583,7 @@ impl TypeChecker {
                 }
                 let (params_type, return_type) = {
                     let entry =
-                        self.function_table
+                        self.function_types
                             .get(&callee)
                             .ok_or(TypeError::FunctionNotDefined {
                                 location,
@@ -880,6 +861,8 @@ impl TypeChecker {
             }
             (Type::Int, Type::Bool) => Some(type_id1),
             (Type::Bool, Type::Int) => Some(type_id2),
+            (Type::Any, t) => Some(type_id2),
+            (t, Type::Any) => Some(type_id1),
             _ => None,
         }
     }

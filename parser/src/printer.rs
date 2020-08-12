@@ -20,6 +20,7 @@ pub fn type_to_string(name_table: &NameTable, type_table: &TypeTable, type_id: T
             let return_str = type_to_string(name_table, type_table, *return_type);
             format!("({}) => {}", params_str, return_str)
         }
+        Type::Any => "any".into(),
         Type::Record(fields) => {
             let fields_str = fields
                 .iter()

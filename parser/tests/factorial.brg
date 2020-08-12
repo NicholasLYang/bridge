@@ -5,3 +5,5 @@ fun factorial(n: int): int {
     n * factorial(n - 1)
   }
 }
+
+print(factorial(8));
