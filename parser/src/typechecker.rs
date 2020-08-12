@@ -117,8 +117,6 @@ pub struct TypeChecker {
     type_names: HashMap<Name, TypeId>,
     // The return type for the typing context
     return_type: Option<TypeId>,
-    // Index for type variable names
-    type_var_index: usize,
     // Type table
     type_table: TypeTable,
     // Symbol table
@@ -142,14 +140,6 @@ fn build_type_names(name_table: &mut NameTable) -> HashMap<Name, TypeId> {
     type_names
 }
 
-pub fn is_ref_type(type_id: TypeId) -> bool {
-    !(type_id == INT_INDEX
-        || type_id == BOOL_INDEX
-        || type_id == UNIT_INDEX
-        || type_id == CHAR_INDEX
-        || type_id == FLOAT_INDEX)
-}
-
 impl TypeChecker {
     pub fn new(mut name_table: NameTable) -> TypeChecker {
         let symbol_table = SymbolTable::new();
@@ -159,7 +149,6 @@ impl TypeChecker {
             symbol_table,
             type_names: build_type_names(&mut name_table),
             return_type: None,
-            type_var_index: 0,
             type_table,
             name_table,
             function_table: HashMap::new(),
@@ -173,43 +162,6 @@ impl TypeChecker {
     #[allow(dead_code)]
     pub fn get_name_table(&self) -> &NameTable {
         &self.name_table
-    }
-
-    fn generate_field_info<'a, I>(&self, fields: I) -> Vec<bool>
-    where
-        I: Iterator<Item = &'a usize>,
-    {
-        // Stores whether or not a field is a reference
-        let mut field_info = Vec::new();
-        for field_type in fields {
-            field_info.push(is_ref_type(*field_type))
-        }
-        field_info
-    }
-
-    fn generate_type_info(&self, type_id: TypeId) -> Option<(usize, Vec<bool>)> {
-        match self.type_table.get_type(type_id) {
-            Type::Record(fields) => {
-                let field_info =
-                    self.generate_field_info(fields.iter().map(|(_, type_id)| type_id));
-                Some((type_id, field_info))
-            }
-            Type::Tuple(type_ids) => Some((type_id, self.generate_field_info(type_ids.iter()))),
-            Type::Solved(type_id) => self.generate_type_info(*type_id),
-            _ => None,
-        }
-    }
-
-    pub fn generate_runtime_type_info(
-        &self,
-        named_types: &Vec<(Name, TypeId)>,
-    ) -> Vec<(Name, Vec<bool>)> {
-        let mut type_info = Vec::new();
-        for (_, type_id) in named_types {
-            self.generate_type_info(*type_id)
-                .map(|info| type_info.push(info));
-        }
-        type_info
     }
 
     pub fn check_program(&mut self, program: Program) -> ProgramT {

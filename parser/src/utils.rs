@@ -26,11 +26,6 @@ impl NameTable {
     pub fn get_str(&self, id: &usize) -> &str {
         self.0.get_by_right(id).unwrap()
     }
-
-    pub fn get_fresh_name(&mut self) -> usize {
-        let ident = format!("var({})", self.1);
-        self.insert(ident)
-    }
 }
 
 // "Table" is a loose term here

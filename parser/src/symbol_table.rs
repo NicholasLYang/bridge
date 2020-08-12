@@ -19,7 +19,6 @@ pub struct SymbolEntry {
 #[derive(Debug)]
 pub struct SymbolTable {
     scopes: Vec<Scope>,
-    function_index: usize,
     // As we collect variables, we insert
     // them into a vec, then when we finish
     // typechecking the function, we reset and spit out
@@ -27,11 +26,6 @@ pub struct SymbolTable {
     var_types: Vec<TypeId>,
     current_scope: usize,
 }
-
-pub static ALLOC_INDEX: u32 = 0;
-pub static DEALLOC_INDEX: u32 = 1;
-pub static CLONE_INDEX: u32 = 2;
-pub static STREQ_INDEX: u32 = 3;
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -41,14 +35,9 @@ impl SymbolTable {
                 is_function_scope: false,
                 parent: None,
             }],
-            function_index: 4,
             var_types: Vec::new(),
             current_scope: 0,
         }
-    }
-
-    pub fn get_function_index(&self) -> usize {
-        self.function_index
     }
 
     pub fn reset_vars(&mut self) -> Vec<TypeId> {
