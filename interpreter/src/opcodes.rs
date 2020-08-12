@@ -3,6 +3,11 @@ use codegenerator::opcodes::*;
 use core::str;
 use std::collections::HashMap;
 
+/// - GetLocal gets a value from the stack at a given stack and variable offset
+/// - SetLocal sets a value on the stack at a given stack and variable offset to the value at the top
+///   of the stack
+/// - Set and Get are equivalent of GetLocal and SetLocal, but the location they access is
+///   determined by popping the top of the stack first
 #[derive(Debug, Clone, Copy)]
 pub enum Opcode {
     Func(FuncDesc), // Function header used for callstack manipulation
@@ -11,13 +16,26 @@ pub enum Opcode {
     StackAllocPtr(u32), // Allocates space on the stack, then pushes a pointer to that space onto the stack
     Alloc(u32), // Allocates space on the heap, then pushes a pointer to that space onto the stack
 
-    MakeTempIntWord(i64), // Make a temporary integer
+    MakeTempInt64(i64), // Make a temporary integer
     LoadStr(u32),
 
-    GetLocalWord { var: i32, offset: u32, line: u32 }, // Reads a word from a variable on the stack
-    SetLocalWord { var: i32, offset: u32, line: u32 }, // Pops a temporary word off the stack, then sets section of variable on the stack to that value
-    GetWord { offset: i32, line: u32 }, // Pops a temporary word off the stack, then reads memory at that word's location
-    SetWord { offset: i32, line: u32 }, // Pops a temporary word off the stack, then sets the value at that word's location to the value of the next word on the stack (which is also popped)
+    GetLocal64 { var: i32, offset: u32, line: u32 },
+    SetLocal64 { var: i32, offset: u32, line: u32 },
+    GetLocal32 { var: i32, offset: u32, line: u32 },
+    SetLocal32 { var: i32, offset: u32, line: u32 },
+    GetLocal16 { var: i32, offset: u32, line: u32 },
+    SetLocal16 { var: i32, offset: u32, line: u32 },
+    GetLocal8 { var: i32, offset: u32, line: u32 },
+    SetLocal8 { var: i32, offset: u32, line: u32 },
+
+    Get64 { offset: i32, line: u32 },
+    Set64 { offset: i32, line: u32 },
+    Get32 { offset: i32, line: u32 },
+    Set32 { offset: i32, line: u32 },
+    Get16 { offset: i32, line: u32 },
+    Set16 { offset: i32, line: u32 },
+    Get8 { offset: i32, line: u32 },
+    Set8 { offset: i32, line: u32 },
 
     Ret, // Returns to caller
 
@@ -31,10 +49,10 @@ pub enum Opcode {
 impl Opcode {
     pub fn line(self) -> u32 {
         match self {
-            Opcode::GetLocalWord { line, .. } => line,
-            Opcode::SetLocalWord { line, .. } => line,
-            Opcode::GetWord { line, .. } => line,
-            Opcode::SetWord { line, .. } => line,
+            Opcode::GetLocal64 { line, .. } => line,
+            Opcode::SetLocal64 { line, .. } => line,
+            Opcode::Get64 { line, .. } => line,
+            Opcode::Set64 { line, .. } => line,
             Opcode::Ecall { line, .. } => line,
             Opcode::Call { line, .. } => line,
             _ => 0,
@@ -90,7 +108,7 @@ impl<'a> Program<'a> {
                     PseudoOp::StackAllocPtr(space) => Opcode::StackAllocPtr(space),
                     PseudoOp::Alloc(space) => Opcode::StackAllocPtr(space),
 
-                    PseudoOp::MakeTempIntWord(int) => Opcode::MakeTempIntWord(int),
+                    PseudoOp::MakeTempInt64(int) => Opcode::MakeTempInt64(int),
                     PseudoOp::LoadString(string) => {
                         let string_index = string_ranges.len();
                         let start = bytes.len();
@@ -99,14 +117,14 @@ impl<'a> Program<'a> {
                         Opcode::LoadStr(string_index as u32)
                     }
 
-                    PseudoOp::GetLocalWord { var, offset, line } => {
-                        Opcode::GetLocalWord { var, offset, line }
+                    PseudoOp::GetLocal64 { var, offset, line } => {
+                        Opcode::GetLocal64 { var, offset, line }
                     }
-                    PseudoOp::SetLocalWord { var, offset, line } => {
-                        Opcode::SetLocalWord { var, offset, line }
+                    PseudoOp::SetLocal64 { var, offset, line } => {
+                        Opcode::SetLocal64 { var, offset, line }
                     }
-                    PseudoOp::GetWord { offset, line } => Opcode::GetWord { offset, line },
-                    PseudoOp::SetWord { offset, line } => Opcode::SetWord { offset, line },
+                    PseudoOp::Get64 { offset, line } => Opcode::Get64 { offset, line },
+                    PseudoOp::Set64 { offset, line } => Opcode::Set64 { offset, line },
 
                     PseudoOp::Ret => Opcode::Ret,
 

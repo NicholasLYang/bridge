@@ -16,24 +16,24 @@ pub enum PseudoOp {
     StackAllocPtr(u32),
     Alloc(u32),
 
-    MakeTempIntWord(i64),
+    MakeTempInt64(i64),
     LoadString(String),
 
-    GetLocalWord {
+    GetLocal64 {
         var: i32,
         offset: u32,
         line: u32,
     },
-    SetLocalWord {
+    SetLocal64 {
         var: i32,
         offset: u32,
         line: u32,
     },
-    GetWord {
+    Get64 {
         offset: i32,
         line: u32,
     },
-    SetWord {
+    Set64 {
         offset: i32,
         line: u32,
     },
