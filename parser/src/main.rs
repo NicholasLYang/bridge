@@ -18,6 +18,7 @@ use crate::ast::{Function, Name, Program, ProgramT};
 use crate::parser::{ParseError, Parser};
 use crate::treewalker::TreeWalker;
 use crate::typechecker::{TypeChecker, TypeError};
+use crate::unparser::Unparser;
 use crate::utils::NameTable;
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFile;
@@ -29,12 +30,15 @@ use std::fs;
 use std::io;
 
 mod ast;
+//mod code_generator;
+//mod emitter;
 mod lexer;
 mod parser;
 mod printer;
 mod symbol_table;
 mod treewalker;
 mod typechecker;
+mod unparser;
 mod utils;
 
 fn main() -> Result<(), io::Error> {
@@ -52,7 +56,14 @@ fn main() -> Result<(), io::Error> {
             for error in &program.errors {
                 diagnostics.push(error.into());
             }
-            let (program_t, functions) = typecheck_file(program, name_table);
+            let unparser = Unparser::new(name_table);
+            let unparser_out = unparser.unparse_program(&program);
+            match unparser_out {
+                Ok(contents) => println!("{}", contents),
+                Err(e) => println!("Unparser error: {:?}", e),
+            }
+
+            /*let (program_t, functions) = typecheck_file(program, name_table);
             for error in &program_t.errors {
                 diagnostics.push(error.into());
             }
@@ -62,7 +73,7 @@ fn main() -> Result<(), io::Error> {
                     println!("{:?}", e);
                 }
                 _ => {}
-            };
+            };*/
         }
         for diagnostic in diagnostics {
             term::emit(&mut writer.lock(), &config, &file, &diagnostic)?;
