@@ -1,83 +1,84 @@
 use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, UnaryOp, Value};
 use crate::lexer::LocationRange;
+use crate::runtime::*;
 use crate::utils::PRINT_INDEX;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+
+// macro_rules! error {
+//     ($arg1:tt,$($arg:tt)*) => {
+//         IError::new($arg1, format!($($arg)*))
+//     };
+// }
+
+macro_rules! err {
+    ($arg1:tt,$($arg:tt)*) => {
+        Err(IError::new($arg1, format!($($arg)*)))
+    };
+}
 
 struct Scope {
-    parent: Option<usize>,
-    variables: HashMap<Name, Value>,
+    variables: HashMap<Name, u64>,
 }
 
 pub struct TreeWalker {
+    memory: Memory<LocationRange>,
     scopes: Vec<Scope>,
-    functions: Arc<HashMap<Name, Function>>,
-    current_scope: usize,
-}
-
-#[derive(Debug, Fail, PartialEq, Clone, Serialize, Deserialize)]
-pub enum WalkerError {
-    #[fail(display = "Not implemented: {}", reason)]
-    NotImplemented {
-        location: LocationRange,
-        reason: &'static str,
-    },
-    #[fail(display = "Not reachable. Internal error")]
-    NotReachable { location: LocationRange },
-    #[fail(display = "Not actually an error. Returning!")]
-    Return {
-        location: LocationRange,
-        value: Value,
-    },
+    functions: HashMap<Name, Function>,
 }
 
 impl TreeWalker {
     pub fn new(functions: HashMap<Name, Function>) -> Self {
         TreeWalker {
+            memory: Memory::new(),
             scopes: vec![Scope {
-                parent: None,
                 variables: HashMap::new(),
             }],
-            current_scope: 0,
-            functions: Arc::new(functions),
+            functions,
         }
     }
 
-    pub fn interpret_program(&mut self, program: ProgramT) -> Result<(), WalkerError> {
+    pub fn interpret_program(&mut self, program: ProgramT) -> Result<(), IError> {
         for stmt in program.stmts {
-            self.interpret_stmt(&stmt)?;
+            if let Some(val) = self.interpret_stmt(&stmt)? {
+                return err!(
+                    "InvalidReturn",
+                    "return in place there shouldn't be a return"
+                );
+            }
         }
+
         Ok(())
     }
 
-    fn lookup_in_scope(&self, name: &Name) -> Option<&Value> {
-        let mut scope_index = Some(self.current_scope);
-        while let Some(s) = scope_index {
-            let entry = self.scopes[s].variables.get(name);
-            if entry.is_some() {
-                return entry;
+    fn lookup_in_scope(&self, name: &Name) -> Option<u64> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.variables.get(name) {
+                return Some(*value);
             }
-            scope_index = self.scopes[s].parent;
         }
+
         None
     }
 
-    fn update_in_scope(&mut self, name: &Name, value: Value) {
-        let mut scope_index = Some(self.current_scope);
-        while let Some(s) = scope_index {
-            if self.scopes[s].variables.contains_key(name) {
-                self.scopes[s].variables.insert(*name, value.clone());
+    fn update_in_scope(&mut self, name: &Name, value: u64) {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(val) = scope.variables.get_mut(name) {
+                *val = value;
+                return;
             }
-            scope_index = self.scopes[s].parent;
         }
+
+        panic!("assigned to variable that doesn't exist");
     }
 
-    fn interpret_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<(), WalkerError> {
+    // returns whether or not to return
+    fn interpret_stmt(&mut self, stmt: &Loc<StmtT>) -> Result<Option<u64>, IError> {
         match &stmt.inner {
             StmtT::Def(name, rhs) => {
                 let rhs_val = self.interpret_expr(rhs)?;
-                self.scopes[self.current_scope]
+                self.scopes
+                    .last_mut()
+                    .unwrap()
                     .variables
                     .insert(*name, rhs_val);
             }
@@ -89,75 +90,49 @@ impl TreeWalker {
                 self.interpret_expr(expr)?;
             }
             StmtT::Function(_) => {}
-            StmtT::Return(expr) => {
-                let value = self.interpret_expr(expr)?;
-                return Err(WalkerError::Return {
-                    location: stmt.location,
-                    value,
-                });
-            }
+            StmtT::Return(expr) => return Ok(Some(self.interpret_expr(expr)?)),
         }
-        Ok(())
+
+        Ok(None)
     }
 
-    fn interpret_expr(&mut self, expr: &Loc<ExprT>) -> Result<Value, WalkerError> {
+    fn interpret_expr(&mut self, expr: &Loc<ExprT>) -> Result<u64, IError> {
         match &expr.inner {
-            ExprT::Primary { value, type_: _ } => Ok(value.clone()),
+            ExprT::Primary { value, type_: _ } => self.interpret_value(value, expr.location),
             ExprT::BinOp {
                 op,
-                lhs,
-                rhs,
-                type_: _,
+                lhs: l_expr,
+                rhs: r_expr,
+                type_,
             } => {
-                let lhs_val = self.interpret_expr(lhs)?;
-                let rhs_val = self.interpret_expr(rhs)?;
-                match (op, lhs_val, rhs_val) {
-                    (Op::Plus, Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l + r)),
-                    (Op::Times, Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l * r)),
-                    (Op::Minus, Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l - r)),
-                    (Op::Div, Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l / r)),
-                    (Op::BangEqual, Value::Integer(l), Value::Integer(r)) => {
-                        Ok(Value::Bool(l != r))
-                    }
-                    (Op::EqualEqual, Value::Integer(l), Value::Integer(r)) => {
-                        Ok(Value::Bool(l == r))
-                    }
-                    (Op::Greater, Value::Integer(l), Value::Integer(r)) => Ok(Value::Bool(l > r)),
-                    (Op::GreaterEqual, Value::Integer(l), Value::Integer(r)) => {
-                        Ok(Value::Bool(l >= r))
-                    }
-                    (Op::Less, Value::Integer(l), Value::Integer(r)) => Ok(Value::Bool(l < r)),
-                    (Op::LessEqual, Value::Integer(l), Value::Integer(r)) => {
-                        Ok(Value::Bool(l <= r))
-                    }
-                    (Op::Plus, Value::Float(l), Value::Float(r)) => Ok(Value::Float(l + r)),
-                    (Op::Times, Value::Float(l), Value::Float(r)) => Ok(Value::Float(l * r)),
-                    (Op::Minus, Value::Float(l), Value::Float(r)) => Ok(Value::Float(l - r)),
-                    (Op::Div, Value::Float(l), Value::Float(r)) => Ok(Value::Float(l / r)),
-                    (Op::BangEqual, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l != r)),
-                    (Op::EqualEqual, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l == r)),
-                    (Op::Greater, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l > r)),
-                    (Op::GreaterEqual, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l >= r)),
-                    (Op::Less, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l < r)),
-                    (Op::LessEqual, Value::Float(l), Value::Float(r)) => Ok(Value::Bool(l <= r)),
-                    (Op::Plus, Value::String(l), Value::String(r)) => {
-                        Ok(Value::String(format!("{}{}", l, r)))
-                    }
-                    (Op::BangEqual, Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l != r)),
-                    (Op::EqualEqual, Value::Bool(l), Value::Bool(r)) => Ok(Value::Bool(l == r)),
-                    _ => Err(WalkerError::NotReachable {
-                        location: expr.location,
-                    }),
-                }
+                let l = self.interpret_expr(l_expr)?;
+                let r = self.interpret_expr(r_expr)?;
+                let (l_i, r_i) = (l as i64, r as i64);
+                let (l_f, r_f) = (f64::from_bits(l), f64::from_bits(r));
+
+                let result = match op {
+                    Op::Plus => (l_i + r_i) as u64,
+                    Op::Times => (l_i * r_i) as u64,
+                    Op::Minus => (l_i - r_i) as u64,
+                    Op::Div => (l_i / r_i) as u64,
+                    Op::BangEqual => (l_i != r_i) as u64,
+                    Op::EqualEqual => (l_i == r_i) as u64,
+                    Op::Greater => (l_i > r_i) as u64,
+                    Op::GreaterEqual => (l_i >= r_i) as u64,
+                    Op::Less => (l_i < r_i) as u64,
+                    Op::LessEqual => (l_i <= r_i) as u64,
+                };
+
+                return Ok(result);
             }
             ExprT::If(cond, then_clause, else_clause, _) => {
                 let cond_val = self.interpret_expr(cond)?;
-                if cond_val == Value::Bool(true) {
-                    self.interpret_expr(then_clause)
+                if cond_val != 0 {
+                    return self.interpret_expr(then_clause);
                 } else if let Some(else_clause) = else_clause {
-                    self.interpret_expr(else_clause)
+                    return self.interpret_expr(else_clause);
                 } else {
-                    Ok(Value::Empty)
+                    return Ok(0);
                 }
             }
             ExprT::Block {
@@ -167,20 +142,20 @@ impl TreeWalker {
                 type_: _,
             } => {
                 self.scopes.push(Scope {
-                    parent: Some(self.current_scope),
                     variables: HashMap::new(),
                 });
-                let old_scope = self.current_scope;
-                self.current_scope = self.scopes.len() - 1;
+
                 for stmt in stmts {
                     self.interpret_stmt(stmt)?;
                 }
-                let val = end_expr
-                    .as_ref()
-                    .map(|expr| self.interpret_expr(expr))
-                    .unwrap_or(Ok(Value::Empty));
-                self.current_scope = old_scope;
-                val
+
+                if let Some(expr) = end_expr {
+                    let val = self.interpret_expr(expr)?;
+                    return Ok(val);
+                } else {
+                    self.scopes.pop();
+                    return Ok(0);
+                }
             }
             ExprT::Call {
                 callee,
@@ -190,66 +165,103 @@ impl TreeWalker {
                 if *callee == PRINT_INDEX {
                     for arg in args {
                         let value = self.interpret_expr(arg)?;
-                        println!("{}", value);
+                        println!("{}", value as i64);
                     }
-                    Ok(Value::Empty)
+                    return Ok(0);
                 } else {
                     let functions = self.functions.clone();
                     let func = functions
                         .get(&callee)
                         .expect("Internal error: function is not defined");
                     self.scopes.push(Scope {
-                        parent: Some(self.current_scope),
                         variables: HashMap::new(),
                     });
-                    let old_scope = self.current_scope;
-                    self.current_scope = self.scopes.len() - 1;
+
                     for (i, param) in func.params.iter().enumerate() {
                         let name = param.inner.0;
                         let arg_val = self.interpret_expr(&args[i])?;
-                        self.scopes[self.current_scope]
-                            .variables
-                            .insert(name, arg_val);
+                        let current_scope = self.scopes.last_mut().unwrap();
+                        current_scope.variables.insert(name, arg_val);
                     }
-                    let val = self.interpret_expr(&func.body);
-                    if let Err(WalkerError::Return { location: _, value }) = val {
-                        return Ok(value);
-                    }
-                    self.current_scope = old_scope;
-                    val
+
+                    let val = self.interpret_expr(&func.body)?;
+                    self.scopes.pop();
+                    return Ok(val);
                 }
             }
             ExprT::Tuple(entries, _) => {
                 let mut values = Vec::new();
-                for entry in entries {
-                    values.push(self.interpret_expr(entry)?);
+
+                for value in entries {
+                    values.push(self.interpret_expr(value)?);
                 }
-                Ok(Value::Tuple(values))
+
+                let ptr = self
+                    .memory
+                    .add_heap_var(values.len() as u32 * 8, expr.location);
+                for (idx, value) in values.iter().enumerate() {
+                    self.memory
+                        .set(ptr.with_offset(idx as u32 * 8), value, expr.location)?;
+                }
+
+                return Ok(ptr.into());
             }
             ExprT::TupleField(tuple, pos, _) => {
-                let val = self.interpret_expr(tuple)?;
-                if let Value::Tuple(entries) = val {
-                    Ok(entries[*pos].clone())
-                } else {
-                    Err(WalkerError::NotReachable {
-                        location: expr.location,
-                    })
-                }
+                let pos = (*pos) as u32;
+                let ptr: VarPointer = self.interpret_expr(tuple)?.into();
+                return Ok(self.memory.get_var(ptr.with_offset(pos))?);
             }
             ExprT::Var { name, type_: _ } => Ok(self
                 .lookup_in_scope(name)
-                .expect("Internal error: variable is not defined")
-                .clone()),
+                .expect("Internal error: variable is not defined")),
             ExprT::UnaryOp { op, rhs, type_: _ } => {
-                let rhs_val = self.interpret_expr(rhs)?;
-                match (op, rhs_val) {
-                    (UnaryOp::Minus, Value::Integer(r)) => Ok(Value::Integer(-r)),
-                    (UnaryOp::Minus, Value::Float(r)) => Ok(Value::Float(-r)),
-                    (UnaryOp::Not, Value::Bool(r)) => Ok(Value::Bool(!r)),
-                    (_, _) => Err(WalkerError::NotReachable {
-                        location: expr.location,
-                    }),
+                let r = self.interpret_expr(rhs)?;
+                let r_i = r as i64;
+                match op {
+                    UnaryOp::Minus => return Ok((-r_i) as u64),
+                    UnaryOp::Not => Ok(if r == 0 { 1 } else { 0 }),
                 }
+            }
+        }
+    }
+
+    fn interpret_value(&mut self, value: &Value, location: LocationRange) -> Result<u64, IError> {
+        match value {
+            Value::Integer(i) => return Ok(*i as u64),
+            Value::Empty => return Ok(0),
+            Value::Float(f) => return Ok(f.to_bits()),
+            Value::Bool(val) => {
+                if *val {
+                    return Ok(1);
+                } else {
+                    return Ok(0);
+                }
+            }
+            Value::Tuple(tup_values) => {
+                let mut values = Vec::new();
+
+                for value in tup_values {
+                    values.push(self.interpret_value(value, location)?);
+                }
+
+                let ptr = self.memory.add_heap_var(values.len() as u32 * 8, location);
+                for (idx, value) in values.iter().enumerate() {
+                    self.memory
+                        .set(ptr.with_offset(idx as u32 * 8), value, location)?;
+                }
+
+                return Ok(ptr.into());
+            }
+            Value::String(string) => {
+                let str_value = string.as_bytes();
+                let str_len = str_value.len() as u32; // TODO check for overflow
+
+                let ptr = self.memory.add_heap_var(str_len + 1, location);
+                self.memory.write_bytes(ptr, str_value, location)?;
+                let mut end_ptr = ptr;
+                end_ptr.set_offset(str_len);
+                self.memory.write_bytes(end_ptr, &vec![0], location)?;
+                return Ok(ptr.into());
             }
         }
     }

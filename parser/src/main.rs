@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 extern crate base64;
 extern crate bimap;
 extern crate byteorder;
@@ -35,6 +38,7 @@ mod ast;
 mod lexer;
 mod parser;
 mod printer;
+mod runtime;
 mod symbol_table;
 mod treewalker;
 mod typechecker;

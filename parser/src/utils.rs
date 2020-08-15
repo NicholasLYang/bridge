@@ -1,5 +1,58 @@
 use crate::ast::{Type, TypeId};
 use bimap::BiMap;
+use codespan_reporting::term::termcolor::{ColorSpec, WriteColor};
+use std::io;
+
+pub fn any_as_u8_slice<T: Sized + Copy>(p: &T) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(p as *const T as *const u8, std::mem::size_of::<T>()) }
+}
+
+pub struct StringWriter {
+    buf: Vec<u8>,
+}
+
+impl StringWriter {
+    pub fn new() -> StringWriter {
+        StringWriter {
+            buf: Vec::with_capacity(8 * 1024),
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        if let Ok(s) = String::from_utf8(self.buf.clone()) {
+            s
+        } else {
+            String::new()
+        }
+    }
+}
+
+impl io::Write for StringWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        for b in buf {
+            self.buf.push(*b);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl WriteColor for StringWriter {
+    fn supports_color(&self) -> bool {
+        false
+    }
+
+    fn set_color(&mut self, _color: &ColorSpec) -> io::Result<()> {
+        return Ok(());
+    }
+
+    fn reset(&mut self) -> io::Result<()> {
+        return Ok(());
+    }
+}
 
 #[derive(Debug)]
 pub struct NameTable(BiMap<String, usize>, usize);
