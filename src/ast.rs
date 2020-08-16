@@ -128,8 +128,8 @@ pub enum ExprT {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Value {
-    Float(f32),
-    Integer(i32),
+    Float(f64),
+    Integer(i64),
     Bool(bool),
     String(String),
     Tuple(Vec<Value>),
