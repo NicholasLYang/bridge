@@ -83,6 +83,10 @@ impl NameTable {
     pub fn get_str(&self, id: &usize) -> &str {
         self.0.get_by_right(id).unwrap()
     }
+
+    pub fn contains_str(&self, str: &String) -> bool {
+        self.0.get_by_left(str).is_some()
+    }
 }
 
 // "Table" is a loose term here

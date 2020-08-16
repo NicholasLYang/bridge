@@ -1,8 +1,0 @@
-fn factorial(n: int) {
-    if n < 2 {
-        1
-    } else {
-        n * factorial(n - 1)
-    }
-}
-print(factorial(8));

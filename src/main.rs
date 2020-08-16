@@ -29,11 +29,12 @@ use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
-use std::env;
+use std::{env};
 use std::fs;
 use std::io;
 use std::io::{Write, Read};
 use std::fs::File;
+use failure::Error;
 
 mod ast;
 mod lexer;
@@ -46,7 +47,7 @@ mod typechecker;
 mod unparser;
 mod utils;
 
-fn main() -> Result<(), io::Error> {
+fn main() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
@@ -61,22 +62,7 @@ fn main() -> Result<(), io::Error> {
             for error in &program.errors {
                 diagnostics.push(error.into());
             }
-            let unparser = Unparser::new(name_table);
-            let unparser_out = unparser.unparse_program(&program);
-            match unparser_out {
-                Ok(contents) => {
-                    let process = Command::new("rustfmt")
-                        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
-                    process.stdin.unwrap().write_all(contents.as_bytes())?;
-                    let mut out_file = File::create("out.brg")?;
-                    let mut proc_out = String::new();
-                    process.stdout.unwrap().read_to_string(&mut proc_out)?;
-                    proc_out = proc_out.replace("print!", "print");
-                    out_file.write_all(proc_out.as_bytes())?;
-                },
-                Err(e) => println!("Unparser error: {:?}", e),
-            }
-
+            println!("{}", unparse_code(program, name_table)?);
             /*let (program_t, functions) = typecheck_file(program, name_table);
             for error in &program_t.errors {
                 diagnostics.push(error.into());
@@ -94,6 +80,46 @@ fn main() -> Result<(), io::Error> {
         }
     };
     Ok(())
+}
+
+fn unparse_code(program: Program, name_table: NameTable) -> Result<String, Error> {
+    let unparser = Unparser::new(name_table);
+    let unparsed_program = unparser.unparse_program(&program)?;
+    let process = Command::new("rustfmt")
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+
+    let mut errors = String::new();
+    let mut stdin = process.stdin.unwrap();
+    let mut stdout = process.stdout.unwrap();
+    let stderr = process.stderr;
+
+
+    println!("{}", unparsed_program.functions);
+    println!("{}", unparsed_program.global_stmts);
+
+    stdin.write_all(unparsed_program.functions.as_bytes())?;
+    let mut functions_out = String::new();
+    println!("9");
+    stdout.read_to_string(&mut functions_out)?;
+    println!("1");
+    if let Some(stderr) = stderr {
+        let mut stderr = stderr;
+        stderr.read_to_string(&mut errors)?;
+        println!("{}", errors);
+    }
+
+    functions_out = functions_out.replace("print!", "print");
+
+    stdin.write_all(unparsed_program.global_stmts.as_bytes())?;
+    let mut globals_out = String::new();
+    stdout.read_to_string(&mut globals_out)?;
+
+    globals_out = globals_out.replace("print!", "print");
+    let first_newline = globals_out.find('\n').unwrap();
+    let start = first_newline + 1;
+    let end = globals_out.len() - 1;
+    println!("7");
+    Ok(format!("{}\n{}", functions_out, &globals_out[start..end]))
 }
 
 impl Into<Diagnostic<()>> for &TypeError {

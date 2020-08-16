@@ -13,6 +13,11 @@ pub enum UnparseError {
     NotImplemented { node: String },
 }
 
+pub struct UnparsedProgram {
+    pub functions: String,
+    pub global_stmts: String
+}
+
 impl Unparser {
     pub fn new(name_table: NameTable) -> Self {
         Unparser {
@@ -21,19 +26,44 @@ impl Unparser {
         }
     }
 
-    pub fn unparse_program(&self, program: &Program) -> Result<String, UnparseError> {
-        let mut stmts = Vec::new();
-        for stmt in &program.stmts {
-            stmts.push(self.unparse_stmt(stmt)?);
+    fn get_free_name(&self) -> String {
+        let mut i = 0;
+        loop {
+            let name = format!("main{}", i);
+            if !self.name_table.contains_str(&name) {
+                return name;
+            }
+            i += 1;
         }
-        Ok(stmts.join("\n"))
+    }
+
+    pub fn unparse_program(&self, program: &Program) -> Result<UnparsedProgram, UnparseError> {
+        let mut functions = Vec::new();
+        let mut global_stmts = Vec::new();
+        for stmt in &program.stmts {
+            if let Stmt::Function { name, params, return_type, body } = &stmt.inner {
+                functions.push(stmt);
+            } else {
+                global_stmts.push(stmt);
+            }
+        }
+        let mut unparsed_functions = Vec::new();
+        for func in functions {
+            unparsed_functions.push(self.unparse_stmt(func)?);
+        }
+        let mut unparsed_global_stmts = Vec::new();
+        for stmt in global_stmts {
+            unparsed_global_stmts.push(self.unparse_stmt(stmt)?);
+        }
+        let main_function = format!("fn {}() {{ {} }}", self.get_free_name(), unparsed_global_stmts.join("\n"));
+        Ok(UnparsedProgram { functions: unparsed_functions.join("\n"), global_stmts: main_function })
     }
 
     fn unparse_stmt(&self, stmt: &Loc<Stmt>) -> Result<String, UnparseError> {
         let indents = "  ".repeat(self.indent_level);
         match &stmt.inner {
             Stmt::Def(name, type_sig, rhs) => Ok(format!(
-                "{}let {}: {} = {}",
+                "{}let {}: {} = {};",
                 indents,
                 self.name_table.get_str(name),
                 self.unparse_type_sig(type_sig)?,
