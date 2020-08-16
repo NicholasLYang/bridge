@@ -275,7 +275,7 @@ impl<'input> Parser<'input> {
     pub fn stmt(&mut self) -> Result<Option<Loc<Stmt>>, ParseError> {
         let tok = self.bump()?;
         let res = match tok {
-            Some((Token::Fun, loc)) => Some(self.function(loc)),
+            Some((Token::Fn, loc)) => Some(self.function(loc)),
             Some((Token::Let, loc)) => Some(self.let_stmt(loc)),
             Some((Token::Return, loc)) => Some(self.return_stmt(loc)),
             Some((Token::If, loc)) => {
@@ -421,7 +421,7 @@ impl<'input> Parser<'input> {
                 self.pushback(span);
                 let stmt = self.stmt()?.ok_or(ParseError::EndOfFile {
                     expected_tokens: expected_tokens_to_string(&vec![
-                        TokenD::Fun,
+                        TokenD::Fn,
                         TokenD::Let,
                         TokenD::While,
                         TokenD::Return,
@@ -466,9 +466,8 @@ impl<'input> Parser<'input> {
         self.expect(TokenD::LParen, "function parameters")?;
         let (params, params_loc) =
             self.comma(&Self::func_params, "function parameters", Token::RParen)?;
-        let (return_type, _) = self.type_sig()?.ok_or(ParseError::TypeSigMandatory {
-            location: params_loc,
-        })?;
+        self.expect(TokenD::Arrow, "function return type")?;
+        let return_type = self.type_()?;
         let token = self.bump()?;
         let body = match token {
             Some((Token::LBrace, left)) => self.expr_block(left)?,

@@ -55,7 +55,7 @@ pub fn token_to_string(name_table: &NameTable, token: &Token) -> String {
         Token::Struct => "struct".to_string(),
         Token::Let => "let".to_string(),
         Token::While => "while".to_string(),
-        Token::Fun => "fun".to_string(),
+        Token::Fn => "fun".to_string(),
         Token::Ident(i) => format!("<{}>", name_table.get_str(i)),
         Token::Float(f) => format!("{}", f),
         Token::Integer(i) => format!("{}", i),

@@ -28,13 +28,14 @@ use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use std::collections::HashMap;
+use std::process::{Command, Stdio};
 use std::env;
 use std::fs;
 use std::io;
+use std::io::{Write, Read};
+use std::fs::File;
 
 mod ast;
-//mod code_generator;
-//mod emitter;
 mod lexer;
 mod parser;
 mod printer;
@@ -63,7 +64,16 @@ fn main() -> Result<(), io::Error> {
             let unparser = Unparser::new(name_table);
             let unparser_out = unparser.unparse_program(&program);
             match unparser_out {
-                Ok(contents) => println!("{}", contents),
+                Ok(contents) => {
+                    let process = Command::new("rustfmt")
+                        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+                    process.stdin.unwrap().write_all(contents.as_bytes())?;
+                    let mut out_file = File::create("out.brg")?;
+                    let mut proc_out = String::new();
+                    process.stdout.unwrap().read_to_string(&mut proc_out)?;
+                    proc_out = proc_out.replace("print!", "print");
+                    out_file.write_all(proc_out.as_bytes())?;
+                },
                 Err(e) => println!("Unparser error: {:?}", e),
             }
 

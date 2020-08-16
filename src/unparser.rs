@@ -1,6 +1,5 @@
 use crate::ast::{Expr, Loc, Program, Stmt, TypeSig, Value};
-use crate::utils::NameTable;
-use itertools::Itertools;
+use crate::utils::{NameTable, PRINT_INDEX};
 use serde::{Deserialize, Serialize};
 
 pub struct Unparser {
@@ -59,7 +58,7 @@ impl Unparser {
                     })
                     .collect();
                 Ok(format!(
-                    "{}fun {}({}) {{\n{}}}",
+                    "{}fn {}({}) {{\n{}}}",
                     indents,
                     self.name_table.get_str(name),
                     params?.join(", "),
@@ -84,9 +83,14 @@ impl Unparser {
             Expr::Call { callee, args } => {
                 let args_str: Result<Vec<_>, _> =
                     args.iter().map(|a| self.unparse_expr(a)).collect();
+                let str = if *callee == PRINT_INDEX {
+                    "print!"
+                } else {
+                    self.name_table.get_str(callee)
+                };
                 Ok(format!(
                     "{}({})",
-                    self.name_table.get_str(callee),
+                    str,
                     args_str?.join(", ")
                 ))
             }
@@ -132,7 +136,9 @@ impl Unparser {
                 }
                 Ok(unparsed_stmts.join(""))
             }
-            Expr::Var { name } => Ok(self.name_table.get_str(name).to_string()),
+            Expr::Var { name } => {
+                Ok(self.name_table.get_str(name).to_string())
+            },
             Expr::If(cond, then_block, else_block) => {
                 let else_str = if let Some(else_block) = else_block {
                     format!(" else {{\n{}}}", self.unparse_expr(else_block)?)

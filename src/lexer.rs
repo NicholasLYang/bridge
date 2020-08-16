@@ -17,7 +17,7 @@ pub enum Token {
     Struct,
     Let,
     While,
-    Fun,
+    Fn,
     Ident(usize),
     Float(f64),
     Integer(i64),
@@ -73,7 +73,7 @@ impl Display for TokenD {
                 TokenD::Struct => "struct",
                 TokenD::Let => "let",
                 TokenD::While => "while",
-                TokenD::Fun => "fun",
+                TokenD::Fn => "fn",
                 TokenD::Ident => "identifier",
                 TokenD::Float => "float",
                 TokenD::Integer => "int",
@@ -167,6 +167,9 @@ pub enum LexicalError {
 
     #[fail(display = "{}: String was not terminated", location)]
     UnterminatedString { location: LocationRange },
+
+    #[fail(display = "This word is reserved for implementation reasons")]
+    ReservedWord {location: LocationRange }
 }
 
 impl LexicalError {
@@ -174,6 +177,7 @@ impl LexicalError {
         match self {
             LexicalError::InvalidCharacter { ch: _, location } => *location,
             LexicalError::UnterminatedString { location } => *location,
+            LexicalError::ReservedWord { location} => *location,
         }
     }
 }
@@ -349,6 +353,7 @@ impl<'input> Lexer<'input> {
             .take_while(|ch| is_id_start(ch) || is_id_body(ch))
             .unwrap_or_else(|| self.source.len());
         let end_loc = self.get_location();
+        let location = LocationRange(start_loc, end_loc);
         let token = match &self.source[start_index..end_index] {
             "else" => Token::Else,
             "false" => Token::False,
@@ -359,8 +364,49 @@ impl<'input> Lexer<'input> {
             "true" => Token::True,
             "let" => Token::Let,
             "while" => Token::While,
-            "fun" => Token::Fun,
+            "fn" => Token::Fn,
             "export" => Token::Export,
+            "as" => return Err(LexicalError::ReservedWord { location }),
+            "break" => return Err(LexicalError::ReservedWord { location }),
+            "const" => return Err(LexicalError::ReservedWord { location }),
+            "continue" => return Err(LexicalError::ReservedWord { location }),
+            "crate" => return Err(LexicalError::ReservedWord { location }),
+            "enum" => return Err(LexicalError::ReservedWord { location }),
+            "extern" => return Err(LexicalError::ReservedWord { location }),
+            "impl" => return Err(LexicalError::ReservedWord { location }),
+            "in" => return Err(LexicalError::ReservedWord { location }),
+            "loop" => return Err(LexicalError::ReservedWord { location }),
+            "match" => return Err(LexicalError::ReservedWord { location }),
+            "mod" => return Err(LexicalError::ReservedWord { location }),
+            "move" => return Err(LexicalError::ReservedWord { location }),
+            "mut" => return Err(LexicalError::ReservedWord { location }),
+            "pub" => return Err(LexicalError::ReservedWord { location }),
+            "ref" => return Err(LexicalError::ReservedWord { location }),
+            "self" => return Err(LexicalError::ReservedWord { location }),
+            "Self" => return Err(LexicalError::ReservedWord { location }),
+            "static" => return Err(LexicalError::ReservedWord { location }),
+            "super" => return Err(LexicalError::ReservedWord { location }),
+            "trait" => return Err(LexicalError::ReservedWord { location }),
+            "type" => return Err(LexicalError::ReservedWord { location }),
+            "unsafe" => return Err(LexicalError::ReservedWord { location }),
+            "use" => return Err(LexicalError::ReservedWord { location }),
+            "where" => return Err(LexicalError::ReservedWord { location }),
+            "async" => return Err(LexicalError::ReservedWord { location }),
+            "await" => return Err(LexicalError::ReservedWord { location }),
+            "dyn" => return Err(LexicalError::ReservedWord { location }),
+            "abstract" => return Err(LexicalError::ReservedWord { location }),
+            "become" => return Err(LexicalError::ReservedWord { location }),
+            "box" => return Err(LexicalError::ReservedWord { location }),
+            "do" => return Err(LexicalError::ReservedWord { location }),
+            "final" => return Err(LexicalError::ReservedWord { location }),
+            "macro" => return Err(LexicalError::ReservedWord { location }),
+            "override" => return Err(LexicalError::ReservedWord { location }),
+            "priv" => return Err(LexicalError::ReservedWord { location }),
+            "typeof" => return Err(LexicalError::ReservedWord { location }),
+            "unsized" => return Err(LexicalError::ReservedWord { location }),
+            "virtual" => return Err(LexicalError::ReservedWord { location }),
+            "yield" => return Err(LexicalError::ReservedWord { location }),
+            "try" => return Err(LexicalError::ReservedWord { location }),
             ident => {
                 let ident = ident.to_string();
                 if let Some(id) = self.name_table.get_id(&ident) {
@@ -371,7 +417,7 @@ impl<'input> Lexer<'input> {
                 }
             }
         };
-        Ok((token, LocationRange(start_loc, end_loc)))
+        Ok((token, location))
     }
 }
 
