@@ -666,6 +666,18 @@ impl TypeChecker {
                 let typed_cond = self.expr(*cond)?;
                 let typed_then_block = self.expr(*then_block)?;
                 let then_type = typed_then_block.inner.get_type();
+                if typed_cond.inner.get_type() != BOOL_INDEX {
+                    let type2 = type_to_string(
+                        &self.name_table,
+                        &self.type_table,
+                        typed_cond.inner.get_type(),
+                    );
+                    return Err(TypeError::UnificationFailure {
+                        location,
+                        type1: "bool".to_string(),
+                        type2,
+                    });
+                }
                 if let Some(else_block) = else_block {
                     let typed_else_block = self.expr(*else_block)?;
                     let else_type = typed_else_block.inner.get_type();
