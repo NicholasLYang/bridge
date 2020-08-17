@@ -97,13 +97,13 @@ pub struct TypeTable {
 // NOTE: This is very brittle as if
 // we change the initial vec in TypeTable
 // these constants will break
-pub static INT_INDEX: usize = 0;
-pub static FLOAT_INDEX: usize = 1;
-pub static CHAR_INDEX: usize = 2;
-pub static STR_INDEX: usize = 3;
-pub static BOOL_INDEX: usize = 4;
-pub static UNIT_INDEX: usize = 5;
-pub static ANY_INDEX: usize = 6;
+pub const INT_INDEX: usize = 0;
+pub const FLOAT_INDEX: usize = 1;
+pub const CHAR_INDEX: usize = 2;
+pub const STR_INDEX: usize = 3;
+pub const BOOL_INDEX: usize = 4;
+pub const UNIT_INDEX: usize = 5;
+pub const ANY_INDEX: usize = 6;
 
 impl TypeTable {
     pub fn new() -> TypeTable {

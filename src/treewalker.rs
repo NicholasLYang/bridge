@@ -1,7 +1,7 @@
 use crate::ast::{ExprT, Function, Loc, Name, Op, ProgramT, StmtT, UnaryOp, Value};
 use crate::lexer::LocationRange;
 use crate::runtime::*;
-use crate::utils::PRINT_INDEX;
+use crate::utils::*;
 use std::collections::HashMap;
 
 // macro_rules! error {
@@ -101,26 +101,61 @@ impl TreeWalker {
             ExprT::Primary { value, type_: _ } => self.interpret_value(value, expr.location),
             ExprT::BinOp {
                 op,
-                lhs: l_expr,
-                rhs: r_expr,
+                lhs,
+                rhs,
                 type_,
             } => {
-                let l = self.interpret_expr(l_expr)?;
-                let r = self.interpret_expr(r_expr)?;
+                let l = self.interpret_expr(lhs)?;
+                let r = self.interpret_expr(rhs)?;
                 let (l_i, r_i) = (l as i64, r as i64);
                 let (l_f, r_f) = (f64::from_bits(l), f64::from_bits(r));
 
-                let result = match op {
-                    Op::Plus => (l_i + r_i) as u64,
-                    Op::Times => (l_i * r_i) as u64,
-                    Op::Minus => (l_i - r_i) as u64,
-                    Op::Div => (l_i / r_i) as u64,
-                    Op::BangEqual => (l_i != r_i) as u64,
-                    Op::EqualEqual => (l_i == r_i) as u64,
-                    Op::Greater => (l_i > r_i) as u64,
-                    Op::GreaterEqual => (l_i >= r_i) as u64,
-                    Op::Less => (l_i < r_i) as u64,
-                    Op::LessEqual => (l_i <= r_i) as u64,
+                let result = match (op, lhs.inner.get_type(), rhs.inner.get_type()) {
+                    (Op::Plus, INT_INDEX, INT_INDEX) => (l_i + r_i) as u64,
+                    (Op::Plus, FLOAT_INDEX, INT_INDEX) => (l_f + r_i as f64).to_bits(),
+                    (Op::Plus, INT_INDEX, FLOAT_INDEX) => (l_i as f64 + r_f).to_bits(),
+                    (Op::Plus, FLOAT_INDEX, FLOAT_INDEX) => (l_f + r_f).to_bits(),
+
+                    (Op::Minus, INT_INDEX, INT_INDEX) => (l_i - r_i) as u64,
+                    (Op::Minus, FLOAT_INDEX, INT_INDEX) => (l_f - r_i as f64).to_bits(),
+                    (Op::Minus, INT_INDEX, FLOAT_INDEX) => (l_i as f64 - r_f).to_bits(),
+                    (Op::Minus, FLOAT_INDEX, FLOAT_INDEX) => (l_f - r_f).to_bits(),
+
+                    (Op::Div, INT_INDEX, INT_INDEX) => (l_i / r_i) as u64,
+                    (Op::Div, FLOAT_INDEX, INT_INDEX) => (l_f / r_i as f64).to_bits(),
+                    (Op::Div, INT_INDEX, FLOAT_INDEX) => (l_i as f64 / r_f).to_bits(),
+                    (Op::Div, FLOAT_INDEX, FLOAT_INDEX) => (l_f / r_f).to_bits(),
+
+                    (Op::Times, INT_INDEX, INT_INDEX) => (l_i * r_i) as u64,
+                    (Op::Times, FLOAT_INDEX, INT_INDEX) => (l_f * r_i as f64).to_bits(),
+                    (Op::Times, INT_INDEX, FLOAT_INDEX) => (l_i as f64 * r_f).to_bits(),
+                    (Op::Times, FLOAT_INDEX, FLOAT_INDEX) => (l_f * r_f).to_bits(),
+
+                    // TODO should negative zero be equal to zero?
+                    (Op::BangEqual, _, _) => (l != r) as u64,
+                    (Op::EqualEqual, _, _) => (l == r) as u64,
+
+                    (Op::Greater, INT_INDEX, INT_INDEX) => (l_i > r_i) as u64,
+                    (Op::Greater, FLOAT_INDEX, INT_INDEX) => (l_f > r_i as f64) as u64,
+                    (Op::Greater, INT_INDEX, FLOAT_INDEX) => (l_i as f64 > r_f) as u64,
+                    (Op::Greater, FLOAT_INDEX, FLOAT_INDEX) => (l_f > r_f) as u64,
+
+                    (Op::GreaterEqual, INT_INDEX, INT_INDEX) => (l_i >= r_i) as u64,
+                    (Op::GreaterEqual, FLOAT_INDEX, INT_INDEX) => (l_f >= r_i as f64) as u64,
+                    (Op::GreaterEqual, INT_INDEX, FLOAT_INDEX) => (l_i as f64 >= r_f) as u64,
+                    (Op::GreaterEqual, FLOAT_INDEX, FLOAT_INDEX) => (l_f >= r_f) as u64,
+
+                    (Op::Less, INT_INDEX, INT_INDEX) => (l_i < r_i) as u64,
+                    (Op::Less, FLOAT_INDEX, INT_INDEX) => (l_f < r_i as f64) as u64,
+                    (Op::Less, INT_INDEX, FLOAT_INDEX) => ((l_i as f64) < r_f) as u64,
+                    (Op::Less, FLOAT_INDEX, FLOAT_INDEX) => (l_f < r_f) as u64,
+
+                    (Op::LessEqual, INT_INDEX, INT_INDEX) => (l_i <= r_i) as u64,
+                    (Op::LessEqual, FLOAT_INDEX, INT_INDEX) => (l_f <= r_i as f64) as u64,
+                    (Op::LessEqual, INT_INDEX, FLOAT_INDEX) => ((l_i as f64) <= r_f) as u64,
+                    (Op::LessEqual, FLOAT_INDEX, FLOAT_INDEX) => (l_f <= r_f) as u64,
+
+                    _ => panic!("unexpected combination of operand types"),
                 };
 
                 return Ok(result);
