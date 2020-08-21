@@ -27,14 +27,12 @@ use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
-use std::collections::HashMap;
-use std::process::{Command, Stdio};
-use std::{env};
-use std::fs;
-use std::io;
-use std::io::{Write, Read};
-use std::fs::File;
 use failure::Error;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::process::{Command, Stdio};
+use std::{env, fs, io, mem};
 
 mod ast;
 mod lexer;
@@ -85,41 +83,42 @@ fn main() -> Result<(), Error> {
 fn unparse_code(program: Program, name_table: NameTable) -> Result<String, Error> {
     let unparser = Unparser::new(name_table);
     let unparsed_program = unparser.unparse_program(&program)?;
-    let process = Command::new("rustfmt")
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
 
-    let mut errors = String::new();
-    let mut stdin = process.stdin.unwrap();
-    let mut stdout = process.stdout.unwrap();
-    let stderr = process.stderr;
+    let format_code = |program: String| -> Result<String, Error> {
+        let formatter = Command::new("rustfmt")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
 
+        let mut stdin = formatter.stdin.unwrap();
+        let mut stdout = formatter.stdout.unwrap();
 
-    println!("{}", unparsed_program.functions);
-    println!("{}", unparsed_program.global_stmts);
+        stdin.write_all(program.as_bytes())?;
+        mem::drop(stdin);
+        let mut out = String::new();
+        stdout.read_to_string(&mut out)?;
 
-    stdin.write_all(unparsed_program.functions.as_bytes())?;
-    let mut functions_out = String::new();
-    println!("9");
-    stdout.read_to_string(&mut functions_out)?;
-    println!("1");
-    if let Some(stderr) = stderr {
-        let mut stderr = stderr;
-        stderr.read_to_string(&mut errors)?;
-        println!("{}", errors);
+        if let Some(stderr) = formatter.stderr {
+            let mut stderr = stderr;
+            let mut errors = String::new();
+            stderr.read_to_string(&mut errors)?;
+            println!("{}", errors);
+        }
+
+        return Ok(out);
+    };
+
+    let functions = format_code(unparsed_program.functions)?;
+    let globals_fmt = format_code(unparsed_program.global_stmts)?;
+    let start = globals_fmt.find('{').unwrap() + 1;
+    let end = globals_fmt.len() - 2;
+
+    let mut globals = String::new();
+    for line in globals_fmt[start..end].trim().split('\n') {
+        globals += line.trim();
     }
 
-    functions_out = functions_out.replace("print!", "print");
-
-    stdin.write_all(unparsed_program.global_stmts.as_bytes())?;
-    let mut globals_out = String::new();
-    stdout.read_to_string(&mut globals_out)?;
-
-    globals_out = globals_out.replace("print!", "print");
-    let first_newline = globals_out.find('\n').unwrap();
-    let start = first_newline + 1;
-    let end = globals_out.len() - 1;
-    println!("7");
-    Ok(format!("{}\n{}", functions_out, &globals_out[start..end]))
+    Ok(format!("{}\n{}", functions, globals))
 }
 
 impl Into<Diagnostic<()>> for &TypeError {
