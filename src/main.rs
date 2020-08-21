@@ -8,14 +8,15 @@ extern crate codespan_reporting;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate im;
 extern crate itertools;
 extern crate leb128;
+extern crate notify;
 extern crate strum;
 #[macro_use]
 extern crate strum_macros;
 extern crate serde;
 extern crate serde_json;
+
 
 use crate::ast::{Function, Name, Program, ProgramT};
 use crate::parser::{ParseError, Parser};
@@ -35,6 +36,8 @@ use std::io;
 use std::io::{Write, Read};
 use std::fs::File;
 use failure::Error;
+use std::path::Path;
+use std::result::Result;
 
 mod ast;
 mod lexer;
@@ -46,6 +49,7 @@ mod treewalker;
 mod typechecker;
 mod unparser;
 mod utils;
+mod watcher;
 
 fn main() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
@@ -62,18 +66,18 @@ fn main() -> Result<(), Error> {
             for error in &program.errors {
                 diagnostics.push(error.into());
             }
-            println!("{}", unparse_code(program, name_table)?);
-            /*let (program_t, functions) = typecheck_file(program, name_table);
+            let (program_t, functions) = typecheck_file(program, name_table);
             for error in &program_t.errors {
                 diagnostics.push(error.into());
             }
             let mut treewalker = TreeWalker::new(functions);
+
             match treewalker.interpret_program(program_t) {
                 Err(e) => {
                     println!("{:?}", e);
                 }
                 _ => {}
-            };*/
+            };
         }
         for diagnostic in diagnostics {
             term::emit(&mut writer.lock(), &config, &file, &diagnostic)?;
@@ -82,43 +86,27 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
+fn format_code(code: &str) -> Result<String, Error> {
+    fs::write("out.brg", code)?;
+    let process = Command::new("rustfmt")
+        .arg("out.brg")
+        .output().expect("failed to run rustfmt");
+    Ok(fs::read_to_string("out.brg")?)
+}
+
 fn unparse_code(program: Program, name_table: NameTable) -> Result<String, Error> {
     let unparser = Unparser::new(name_table);
     let unparsed_program = unparser.unparse_program(&program)?;
-    let process = Command::new("rustfmt")
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
 
-    let mut errors = String::new();
-    let mut stdin = process.stdin.unwrap();
-    let mut stdout = process.stdout.unwrap();
-    let stderr = process.stderr;
-
-
-    println!("{}", unparsed_program.functions);
-    println!("{}", unparsed_program.global_stmts);
-
-    stdin.write_all(unparsed_program.functions.as_bytes())?;
-    let mut functions_out = String::new();
-    println!("9");
-    stdout.read_to_string(&mut functions_out)?;
-    println!("1");
-    if let Some(stderr) = stderr {
-        let mut stderr = stderr;
-        stderr.read_to_string(&mut errors)?;
-        println!("{}", errors);
-    }
-
+    let mut functions_out = format_code(&unparsed_program.functions)?;
     functions_out = functions_out.replace("print!", "print");
 
-    stdin.write_all(unparsed_program.global_stmts.as_bytes())?;
-    let mut globals_out = String::new();
-    stdout.read_to_string(&mut globals_out)?;
-
+    let mut globals_out = format_code(&unparsed_program.global_stmts)?;
     globals_out = globals_out.replace("print!", "print");
+
     let first_newline = globals_out.find('\n').unwrap();
     let start = first_newline + 1;
-    let end = globals_out.len() - 1;
-    println!("7");
+    let end = globals_out.len() - 2;
     Ok(format!("{}\n{}", functions_out, &globals_out[start..end]))
 }
 

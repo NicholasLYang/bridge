@@ -1,5 +1,5 @@
 use crate::ast::{Name, TypeId};
-use im::hashmap::HashMap;
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Scope {
@@ -72,10 +72,6 @@ impl SymbolTable {
 
     pub fn lookup_name(&mut self, name: usize) -> Option<&SymbolEntry> {
         self.lookup_name_in_scope(name, self.current_scope)
-    }
-
-    pub fn get_scope_entries(&self, scope: usize) -> impl Iterator<Item = &(Name, SymbolEntry)> {
-        self.scopes[scope].symbols.iter()
     }
 
     // Looks up name in scope
