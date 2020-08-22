@@ -71,7 +71,7 @@ impl fmt::Debug for VarPointer {
 
 impl Into<u64> for VarPointer {
     fn into(self) -> u64 {
-        (self._idx << 32) as u64 + self._offset as u64
+        ((self._idx as u64) << 32) + self._offset as u64
     }
 }
 
