@@ -31,15 +31,9 @@ use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use failure::Error;
 use std::collections::HashMap;
 use std::fs::File;
-<<<<<<< HEAD
-use failure::Error;
-use std::path::Path;
-use std::result::Result;
-=======
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::{env, fs, io, mem};
->>>>>>> b44dc6e2fe67ccff4a12305bdbb94cfaaae00bef
 
 mod ast;
 mod lexer;
