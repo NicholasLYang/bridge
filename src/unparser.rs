@@ -88,10 +88,11 @@ impl Unparser {
                     })
                     .collect();
                 Ok(format!(
-                    "{}fn {}({}) {{\n{}}}",
+                    "{}fn {}({}) -> {} {{\n{}}}",
                     indents,
                     self.name_table.get_str(name),
                     params?.join(", "),
+                    self.unparse_type_sig(return_type)?,
                     self.unparse_expr(body)?
                 ))
             }

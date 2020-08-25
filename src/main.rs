@@ -24,16 +24,16 @@ use crate::treewalker::TreeWalker;
 use crate::typechecker::{TypeChecker, TypeError};
 use crate::unparser::Unparser;
 use crate::utils::NameTable;
+use std::io::{stdout, stdin};
 use codespan_reporting::diagnostic::{Diagnostic, Label};
 use codespan_reporting::files::SimpleFile;
 use codespan_reporting::term;
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use failure::Error;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
-use std::{env, fs, io, mem};
+use std::{env, fs, mem};
 
 mod ast;
 mod lexer;
@@ -52,7 +52,7 @@ fn main() -> Result<(), Error> {
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = codespan_reporting::term::Config::default();
     if args.len() < 2 {
-        println!("Usage: saber <file>");
+        return run_repl();
     } else {
         let file_name = &args[1];
         let contents = fs::read_to_string(file_name)?;
@@ -62,6 +62,8 @@ fn main() -> Result<(), Error> {
             for error in &program.errors {
                 diagnostics.push(error.into());
             }
+            let code = unparse_code(&program, name_table.clone())?;
+            println!("{}", code);
             let (program_t, functions) = typecheck_file(program, name_table);
             for error in &program_t.errors {
                 diagnostics.push(error.into());
@@ -82,6 +84,33 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
+fn run_repl() -> Result<(), Error> {
+    loop {
+        let mut input = String::new();
+        print!("> ");
+        stdout().flush()?;
+        stdin().read_line(&mut input)?;
+        let mut diagnostics: Vec<Diagnostic<()>> = Vec::new();
+        if let Some((program, name_table)) = parse_file(&input) {
+            for error in &program.errors {
+                diagnostics.push(error.into());
+            }
+            let (program_t, functions) = typecheck_file(program, name_table);
+            for error in &program_t.errors {
+                diagnostics.push(error.into());
+            }
+            let mut treewalker = TreeWalker::new(functions);
+
+            match treewalker.interpret_program(program_t) {
+                Err(e) => {
+                    println!("{:?}", e);
+                }
+                _ => {}
+            };
+        }
+    }
+}
+
 fn format_code(code: &str) -> Result<String, Error> {
     fs::write("out.brg", code)?;
     let process = Command::new("rustfmt")
@@ -90,9 +119,9 @@ fn format_code(code: &str) -> Result<String, Error> {
     Ok(fs::read_to_string("out.brg")?)
 }
 
-fn unparse_code(program: Program, name_table: NameTable) -> Result<String, Error> {
+fn unparse_code(program: &Program, name_table: NameTable) -> Result<String, Error> {
     let unparser = Unparser::new(name_table);
-    let unparsed_program = unparser.unparse_program(&program)?;
+    let unparsed_program = unparser.unparse_program(program)?;
 
     let format_code = |program: String| -> Result<String, Error> {
         let formatter = Command::new("rustfmt")
@@ -120,6 +149,9 @@ fn unparse_code(program: Program, name_table: NameTable) -> Result<String, Error
 
     let functions = format_code(unparsed_program.functions)?;
     let globals_fmt = format_code(unparsed_program.global_stmts)?;
+    let functions = functions.replace("print!(", "print(");
+    let globals_fmt = globals_fmt.replace("print!(", "print(");
+
     let start = globals_fmt.find('{').unwrap() + 1;
     let end = globals_fmt.len() - 2;
 

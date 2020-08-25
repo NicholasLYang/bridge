@@ -54,7 +54,7 @@ impl WriteColor for StringWriter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NameTable(BiMap<String, usize>, usize);
 
 pub static PRINT_INDEX: usize = 0;
