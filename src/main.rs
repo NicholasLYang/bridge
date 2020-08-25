@@ -49,37 +49,12 @@ mod watcher;
 
 fn main() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
-    let writer = StandardStream::stderr(ColorChoice::Always);
-    let config = codespan_reporting::term::Config::default();
     if args.len() < 2 {
         return run_repl();
     } else {
         let file_name = &args[1];
         let contents = fs::read_to_string(file_name)?;
-        let file = SimpleFile::new(file_name, &contents);
-        let mut diagnostics: Vec<Diagnostic<()>> = Vec::new();
-        if let Some((program, name_table)) = parse_file(&contents) {
-            for error in &program.errors {
-                diagnostics.push(error.into());
-            }
-            let code = unparse_code(&program, name_table.clone())?;
-            println!("{}", code);
-            let (program_t, functions) = typecheck_file(program, name_table);
-            for error in &program_t.errors {
-                diagnostics.push(error.into());
-            }
-            let mut treewalker = TreeWalker::new(functions);
-
-            match treewalker.interpret_program(program_t) {
-                Err(e) => {
-                    println!("{:?}", e);
-                }
-                _ => {}
-            };
-        }
-        for diagnostic in diagnostics {
-            term::emit(&mut writer.lock(), &config, &file, &diagnostic)?;
-        }
+        interpret_code(&contents, &file_name)?;
     };
     Ok(())
 }
@@ -90,24 +65,7 @@ fn run_repl() -> Result<(), Error> {
         print!("> ");
         stdout().flush()?;
         stdin().read_line(&mut input)?;
-        let mut diagnostics: Vec<Diagnostic<()>> = Vec::new();
-        if let Some((program, name_table)) = parse_file(&input) {
-            for error in &program.errors {
-                diagnostics.push(error.into());
-            }
-            let (program_t, functions) = typecheck_file(program, name_table);
-            for error in &program_t.errors {
-                diagnostics.push(error.into());
-            }
-            let mut treewalker = TreeWalker::new(functions);
-
-            match treewalker.interpret_program(program_t) {
-                Err(e) => {
-                    println!("{:?}", e);
-                }
-                _ => {}
-            };
-        }
+        interpret_code(&input, "<repl>")?;
     }
 }
 
@@ -117,6 +75,34 @@ fn format_code(code: &str) -> Result<String, Error> {
         .arg("out.brg")
         .output().expect("failed to run rustfmt");
     Ok(fs::read_to_string("out.brg")?)
+}
+
+fn interpret_code(code: &str, file_name: &str) -> Result<(), Error> {
+    let writer = StandardStream::stderr(ColorChoice::Always);
+    let config = codespan_reporting::term::Config::default();
+    let file = SimpleFile::new(file_name, code);
+    let mut diagnostics: Vec<Diagnostic<()>> = Vec::new();
+    if let Some((program, name_table)) = parse_file(code) {
+        for error in &program.errors {
+            diagnostics.push(error.into());
+        }
+        let (program_t, functions) = typecheck_file(program, name_table);
+        for error in &program_t.errors {
+            diagnostics.push(error.into());
+        }
+        let mut treewalker = TreeWalker::new(functions);
+
+        match treewalker.interpret_program(program_t) {
+            Err(e) => {
+                println!("{:?}", e);
+            }
+            _ => {}
+        };
+    }
+    for diagnostic in diagnostics {
+        term::emit(&mut writer.lock(), &config, &file, &diagnostic)?;
+    }
+    Ok(())
 }
 
 fn unparse_code(program: &Program, name_table: NameTable) -> Result<String, Error> {
@@ -197,7 +183,7 @@ fn typecheck_file(program: Program, name_table: NameTable) -> (ProgramT, HashMap
     )
 }
 
-fn parse_file(contents: &String) -> Option<(Program, NameTable)> {
+fn parse_file(contents: &str) -> Option<(Program, NameTable)> {
     let lexer = lexer::Lexer::new(contents);
     let mut parser = Parser::new(lexer);
     if let Ok(program) = parser.program() {
