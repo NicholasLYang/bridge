@@ -210,6 +210,7 @@ impl TreeWalker {
                                 println!("{}", string);
                             }
                             UNIT_INDEX => println!("()"),
+                            BOOL_INDEX => println!("{}", value != 0),
                             id => panic!("invalid type id: {}", id),
                         }
                     }
