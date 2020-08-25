@@ -200,7 +200,18 @@ impl TreeWalker {
                 if *callee == PRINT_INDEX {
                     for arg in args {
                         let value = self.interpret_expr(arg)?;
-                        println!("{}", value as i64);
+                        match arg.inner.get_type() {
+                            INT_INDEX => println!("{}", value as i64),
+                            FLOAT_INDEX => println!("{}", f64::from_bits(value)),
+                            STR_INDEX => {
+                                let ptr: VarPointer = value.into();
+                                let string = self.memory.get_var_slice(ptr)?;
+                                let string = unsafe { std::str::from_utf8_unchecked(string) };
+                                println!("{}", string);
+                            }
+                            UNIT_INDEX => println!("()"),
+                            id => panic!("invalid type id: {}", id),
+                        }
                     }
                     return Ok(0);
                 } else {
