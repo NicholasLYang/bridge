@@ -199,20 +199,7 @@ impl TreeWalker {
             } => {
                 if *callee == PRINT_INDEX {
                     for arg in args {
-                        let value = self.interpret_expr(arg)?;
-                        match arg.inner.get_type() {
-                            INT_INDEX => println!("{}", value as i64),
-                            FLOAT_INDEX => println!("{}", f64::from_bits(value)),
-                            STR_INDEX => {
-                                let ptr: VarPointer = value.into();
-                                let string = self.memory.get_var_slice(ptr)?;
-                                let string = unsafe { std::str::from_utf8_unchecked(string) };
-                                println!("{}", string);
-                            }
-                            UNIT_INDEX => println!("()"),
-                            BOOL_INDEX => println!("{}", value != 0),
-                            id => panic!("invalid type id: {}", id),
-                        }
+                        self.print_expr(arg)?;
                     }
                     return Ok(0);
                 } else {
@@ -270,6 +257,25 @@ impl TreeWalker {
                 }
             }
         }
+    }
+
+    fn print_expr(&mut self, expr: &Loc<ExprT>) -> Result<(), IError> {
+        let value = self.interpret_expr(expr)?;
+        match expr.inner.get_type() {
+            INT_INDEX => println!("{}", value as i64),
+            FLOAT_INDEX => println!("{}", f64::from_bits(value)),
+            STR_INDEX => {
+                let ptr: VarPointer = value.into();
+                let string = self.memory.get_var_slice(ptr)?;
+                let string = unsafe { std::str::from_utf8_unchecked(string) };
+                println!("{}", string);
+            }
+            UNIT_INDEX => println!("()"),
+            BOOL_INDEX => println!("{}", value != 0),
+            id => panic!("invalid type id: {}", id),
+        }
+
+        Ok(())
     }
 
     fn interpret_value(&mut self, value: &Value, location: LocationRange) -> Result<u64, IError> {
