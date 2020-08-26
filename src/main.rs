@@ -65,11 +65,14 @@ fn run_repl() -> Result<(), Error> {
         print!("> ");
         stdout().flush()?;
         stdin().read_line(&mut input)?;
-        match input.chars().last() {
+        match input.trim().chars().last() {
             Some(';') | Some('}') => {
                 interpret_code(&input, "<repl>")?;
             }
-            _ => interpret_expr(&input, "<repl>")
+            c => {
+                println!("{:?}", c);
+                interpret_expr(&input, "<repl>")
+            }
         }
 
     }
@@ -108,7 +111,7 @@ fn interpret_expr(code: &str, file_name: &str) {
     };
     let functions = typechecker.get_functions();
     let mut treewalker = TreeWalker::new(functions);
-    treewalker.interpret_expr(&expr_t);
+    treewalker.print_expr(&expr_t);
 }
 
 

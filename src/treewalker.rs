@@ -259,7 +259,7 @@ impl TreeWalker {
         }
     }
 
-    fn print_expr(&mut self, expr: &Loc<ExprT>) -> Result<(), IError> {
+    pub fn print_expr(&mut self, expr: &Loc<ExprT>) -> Result<(), IError> {
         let value = self.interpret_expr(expr)?;
         match expr.inner.get_type() {
             INT_INDEX => println!("{}", value as i64),
