@@ -65,7 +65,13 @@ fn run_repl() -> Result<(), Error> {
         print!("> ");
         stdout().flush()?;
         stdin().read_line(&mut input)?;
-        interpret_code(&input, "<repl>")?;
+        match input.chars().last() {
+            Some(';') | Some('}') => {
+                interpret_code(&input, "<repl>")?;
+            }
+            _ => interpret_expr(&input, "<repl>")
+        }
+
     }
 }
 
@@ -76,6 +82,35 @@ fn format_code(code: &str) -> Result<String, Error> {
         .output().expect("failed to run rustfmt");
     Ok(fs::read_to_string("out.brg")?)
 }
+
+fn interpret_expr(code: &str, file_name: &str) {
+    let writer = StandardStream::stderr(ColorChoice::Always);
+    let config = codespan_reporting::term::Config::default();
+    let file = SimpleFile::new(file_name, code);
+    let lexer = lexer::Lexer::new(code);
+    let mut parser = Parser::new(lexer);
+    let expr = match parser.expr() {
+        Ok(e) => e,
+        Err(err) => {
+            let diagnostic: Diagnostic<()> = (&err).into();
+            term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
+            return;
+        }
+    };
+    let mut typechecker = TypeChecker::new(parser.get_name_table());
+    let expr_t = match typechecker.expr(expr) {
+        Ok(e) => e,
+        Err(err) => {
+            let diagnostic: Diagnostic<()> = (&err).into();
+            term::emit(&mut writer.lock(), &config, &file, &diagnostic).unwrap();
+            return;
+        }
+    };
+    let functions = typechecker.get_functions();
+    let mut treewalker = TreeWalker::new(functions);
+    treewalker.interpret_expr(&expr_t);
+}
+
 
 fn interpret_code(code: &str, file_name: &str) -> Result<(), Error> {
     let writer = StandardStream::stderr(ColorChoice::Always);

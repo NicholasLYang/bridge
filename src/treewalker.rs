@@ -96,7 +96,7 @@ impl TreeWalker {
         Ok(None)
     }
 
-    fn interpret_expr(&mut self, expr: &Loc<ExprT>) -> Result<u64, IError> {
+    pub fn interpret_expr(&mut self, expr: &Loc<ExprT>) -> Result<u64, IError> {
         match &expr.inner {
             ExprT::Primary { value, type_: _ } => self.interpret_value(value, expr.location),
             ExprT::BinOp {

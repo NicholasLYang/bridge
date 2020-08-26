@@ -361,7 +361,7 @@ impl<'input> Parser<'input> {
         })
     }
 
-    fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
+    pub fn expr(&mut self) -> Result<Loc<Expr>, ParseError> {
         match self.bump()? {
             Some((Token::LBrace, left)) => self.expr_block(left),
             Some((Token::If, left)) => self.if_expr(left),

@@ -504,7 +504,7 @@ impl TypeChecker {
         })
     }
 
-    fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
+    pub fn expr(&mut self, expr: Loc<Expr>) -> Result<Loc<ExprT>, TypeError> {
         let location = expr.location;
         match expr.inner {
             Expr::Primary { value } => Ok(Loc {
